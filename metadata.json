@@ -1,0 +1,6 @@
+{
+  "name": "LisYan Launcher - Widgets & AI Search",
+  "description": "Customizable launcher with movable search bar, logo and buttons, Nothing-style glyph matrix clocks, AI Google search button, and 26 weather widgets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LisYan Search Launcher</title>
+    <meta name="description" content="Customizable minimalist search launcher with Nothing OS style glyph matrix clocks and weather widgets." />
+    <meta property="og:title" content="LisYan Search Launcher" />
+    <meta property="og:description" content="Customizable minimalist search launcher with Nothing OS style glyph matrix clocks and weather widgets." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Roboto Flex: variable width and weight for expressive clock digits -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wdth,wght@8..144,25..151,100..1000&display=swap" />
+
+    <!-- Preload & load stylesheets directly to prevent FOUC / unstyled lag -->
+    <link rel="stylesheet" href="/src/fonts/led-dot-matrix.css" />
+    <link rel="stylesheet" href="/src/index.css" />
+
+    <script>
+      // Apply the last theme, palette and language before the first paint (no flash of wrong colours).
+      try {
+        var boot = JSON.parse(localStorage.getItem("lisyan_boot") || "null");
+        if (boot) {
+          var root = document.documentElement;
+          if (boot.theme) root.dataset.theme = boot.theme;
+          if (boot.fontTheme) root.dataset.fontTheme = boot.fontTheme;
+          if (boot.lang) root.lang = boot.lang;
+          if (boot.dir) root.dir = boot.dir;
+          if (boot.vars) for (var name in boot.vars) root.style.setProperty(name, boot.vars[name]);
+        }
+      } catch (error) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
