@@ -24,7 +24,7 @@ export const COMPLEX_SCRIPT = /[\u0590-\u08FF\u0900-\u0DFF\u0E00-\u0FFF\u1000-\u
 
 /* ---------- tokens: animated letters + "ghost" runs of erased letters ---------- */
 
-export type CharToken = { kind: "char"; id: number; ch: string; animate: boolean; order: number };
+export type CharToken = { kind: "char"; id: number; ch: string; animate: boolean; order: number; bulk?: boolean };
 export type GhostToken = { kind: "ghost"; id: number; chars: string[]; dies: number };
 export type Token = CharToken | GhostToken;
 
@@ -39,6 +39,7 @@ function diffTokens(
   caret: number | null,
   exit: boolean,
   exitLife: (count: number) => number,
+  bulkRef?: { current: boolean },
 ): Token[] {
   const nextChars = splitGraphemes(next);
   const visible: number[] = [];
@@ -68,7 +69,8 @@ function diffTokens(
   if (removed.length && exit) {
     out.push({ kind: "ghost", id: ++uid, chars: removed, dies: performance.now() + exitLife(removed.length) });
   }
-  nextChars.slice(p, nl - s).forEach((ch, order) => out.push({ kind: "char", id: ++uid, ch, animate: true, order }));
+  const bulk = Boolean(bulkRef?.current);
+  nextChars.slice(p, nl - s).forEach((ch, order) => out.push({ kind: "char", id: ++uid, ch, animate: true, order, bulk }));
   out.push(...prev.slice(endCut));
   return out;
 }
@@ -79,6 +81,8 @@ type TokenOptions = {
   exitLife: (count: number) => number;
   /** Caret position (UTF-16) recorded together with the value it belongs to. */
   caret?: { current: { value: string; caret: number } | null };
+  /** Set while a paste/autofill is in flight — new letters use the "paste" flourish. */
+  bulkRef?: { current: boolean };
 };
 
 /** Turns a string into stable letter tokens; new letters animate in, erased ones linger as ghosts. */
@@ -90,7 +94,7 @@ export function useAnimatedTokens(value: string, options: TokenOptions): Token[]
     // Adjusting state while rendering (React's documented pattern for derived state).
     const info = options.caret?.current;
     const caret = info && info.value === value ? graphemeCount(value.slice(0, info.caret)) : null;
-    tokens = options.enabled ? diffTokens(state.tokens, value, caret, options.exit, options.exitLife) : initTokens(value);
+    tokens = options.enabled ? diffTokens(state.tokens, value, caret, options.exit, options.exitLife, options.bulkRef) : initTokens(value);
     setState({ value, tokens });
   }
 
@@ -178,10 +182,13 @@ const EASING: Record<Easing, string> = {
 
 const exitEasing = (easing: Easing) => (easing === "linear" ? "linear" : easing === "smooth" ? EASING.smooth : "cubic-bezier(0.3, 0, 0.8, 0.15)");
 
-export function enterAnimation(anim: TextAnim, order: number): string {
+export function enterAnimation(anim: TextAnim, order: number, bulk = false): string {
   const delay = order * anim.stagger;
-  const parts = [`ai-in-${anim.enter} ${anim.enterDuration}ms ${EASING[anim.easing]} ${delay}ms both`];
-  if (anim.highlight) parts.push(`ai-hl ${Math.round(anim.enterDuration * 2.5)}ms ease-out ${delay}ms both`);
+  // Pasted / bulk-replaced text gets its own flourish regardless of the chosen enter effect.
+  const effect = bulk ? "ai-in-paste" : `ai-in-${anim.enter}`;
+  const duration = bulk ? Math.max(anim.enterDuration, 520) : anim.enterDuration;
+  const parts = [`${effect} ${duration}ms ${bulk ? "cubic-bezier(0.16, 1, 0.3, 1)" : EASING[anim.easing]} ${delay}ms both`];
+  if (anim.highlight) parts.push(`ai-hl ${Math.round(duration * 2.5)}ms ease-out ${delay}ms both`);
   return parts.join(", ");
 }
 
@@ -189,6 +196,9 @@ export function exitAnimation(anim: TextAnim, index: number, count: number): str
   const delay = Math.round((count - 1 - index) * anim.stagger * 0.5);
   return `ai-out-${anim.exit} ${anim.exitDuration}ms ${exitEasing(anim.easing)} ${delay}ms both`;
 }
+
+/** Class hook for effects that need per-letter variation (e.g. shatter directions). */
+export const exitClass = (anim: TextAnim) => (anim.exit === "shatter" ? "shatter" : "");
 
 /** Intensity → distances, scales and blur used by the keyframes in index.css. */
 export function animVars(anim: TextAnim): CSSProperties {

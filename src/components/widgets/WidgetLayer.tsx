@@ -2,8 +2,10 @@ import { Copy, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import Clock from "./Clock";
+import { ARROW_DIRECTIONS, DRAG_THRESHOLD, ElementToolbar, GuideLines, LONG_PRESS, NO_GUIDES, SelectionChrome, growsLeft, growsUp, guideLines, magnet, resizeDelta, type Direction, type Guides } from "./engine";
 import { useI18n } from "../../lib/i18n";
 import type { HomeWidget, HomeLayout } from "../../lib/settings";
+import { stageScale } from "../../lib/stage";
 import { SIZE_MAX, SIZE_MIN, captionText, snapWithin, toPosition, useViewport, widgetRect, widgetSize, type Rect } from "../../lib/widgets";
 import { cn } from "../../utils/cn";
 
@@ -23,25 +25,6 @@ type Props = {
 };
 
 type Draft = { id: string; left: number; top: number; size: number };
-type Guides = { x: number[]; y: number[] };
-
-const NO_GUIDES: Guides = { x: [], y: [] };
-const MAGNET = 6;
-const LONG_PRESS = 550;
-const DIRECTIONS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-
-/** Pulls the box (its start, centre or end) onto the nearest guide line within MAGNET px. */
-function magnet(start: number, length: number, lines: number[], max: number) {
-  let best: { delta: number; line: number } | null = null;
-  for (const line of lines) {
-    for (const edge of [start, start + length / 2, start + length]) {
-      const delta = line - edge;
-      if (Math.abs(delta) <= MAGNET && (!best || Math.abs(delta) < Math.abs(best.delta))) best = { delta, line };
-    }
-  }
-  if (!best) return { value: start, guide: null };
-  return { value: Math.min(Math.max(0, start + best.delta), max), guide: best.line };
-}
 
 /** Widgets on the start page: static in normal mode, draggable and resizable while editing. */
 export default function WidgetLayer({ widgets, layout, editing, selectedId, halo, onSelect, onChange, onRemove, onDuplicate, onEnterEdit, onDragState }: Props) {
@@ -51,8 +34,8 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
   const [guides, setGuides] = useState<Guides>(NO_GUIDES);
   const press = useRef<{ x: number; y: number; timer: number } | null>(null);
   const rects = useMemo(() => new Map(widgets.map((widget) => [widget.id, widgetRect(widget, viewport, layout)])), [widgets, viewport, layout]);
-  const grid = layout.mode === "grid";
-  const showGrid = grid && (layout.showGrid === "always" || (editing && layout.showGrid === "editing"));
+  const grid = layout.mode === "grid" || layout.showGrid === "always";
+  const showGrid = layout.showGrid === "always" || (editing && layout.showGrid === "editing");
 
   const cancelPress = () => {
     if (!press.current) return;
@@ -72,10 +55,9 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
     const y = Math.min(Math.max(0, top), maxY);
     if (grid) return { left: snapWithin(x, layout.cell, maxX), top: snapWithin(y, layout.cell, maxY), guides: NO_GUIDES };
     if (!layout.guides) return { left: x, top: y, guides: NO_GUIDES };
-    const linesX = [viewport.w / 2, 24, viewport.w - 24, ...others.flatMap((rect) => [rect.left, rect.left + rect.width / 2, rect.left + rect.width])];
-    const linesY = [viewport.h / 2, 24, viewport.h - 24, ...others.flatMap((rect) => [rect.top, rect.top + rect.height / 2, rect.top + rect.height])];
-    const snappedX = magnet(x, origin.width, linesX, maxX);
-    const snappedY = magnet(y, origin.height, linesY, maxY);
+    const lines = guideLines(viewport, others);
+    const snappedX = magnet(x, origin.width, lines.x, maxX);
+    const snappedY = magnet(y, origin.height, lines.y, maxY);
     return {
       left: snappedX.value,
       top: snappedY.value,
@@ -83,9 +65,7 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
     };
   };
 
-  type DragDir = "move" | "nw" | "ne" | "se" | "sw" | "n" | "s" | "e" | "w";
-
-  const startGesture = (event: ReactPointerEvent<HTMLElement>, widget: HomeWidget, dir: DragDir) => {
+  const startGesture = (event: ReactPointerEvent<HTMLElement>, widget: HomeWidget, dir: Direction) => {
     if (!editing) {
       // Press and hold enters edit mode (right-click does too, see onContextMenu).
       if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -112,14 +92,15 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
     const { width: origW, height: origH, caption } = widgetSize(widget);
     const k = origW / Math.max(1, origH - caption);
     const { clientX: startX, clientY: startY, pointerId } = event;
+    const zoom = stageScale(); // the screen is smaller than its layout while editing
     let moved = false;
     let latest: Draft | null = null;
 
     const move = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      if (!moved && Math.hypot(dx, dy) < 3) return;
+      const dx = (e.clientX - startX) / zoom;
+      const dy = (e.clientY - startY) / zoom;
+      if (!moved && Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD) return;
       if (!moved) {
         moved = true;
         onDragState(true);
@@ -129,29 +110,9 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
         latest = { id: widget.id, left: placed.left, top: placed.top, size: widget.size };
         setGuides(placed.guides);
       } else {
-        // Multi-directional resizing in every direction
         const faceH = origin.height - caption;
         const diagonal = Math.hypot(origin.width, faceH);
-
-        let delta = 0;
-        if (dir === "se") {
-          delta = (dx * origin.width + dy * faceH) / diagonal;
-        } else if (dir === "sw") {
-          delta = (-dx * origin.width + dy * faceH) / diagonal;
-        } else if (dir === "ne") {
-          delta = (dx * origin.width - dy * faceH) / diagonal;
-        } else if (dir === "nw") {
-          delta = (-dx * origin.width - dy * faceH) / diagonal;
-        } else if (dir === "e") {
-          delta = dx;
-        } else if (dir === "w") {
-          delta = -dx;
-        } else if (dir === "s") {
-          delta = dy;
-        } else if (dir === "n") {
-          delta = -dy;
-        }
-
+        const delta = resizeDelta(dir, dx, dy, origin.width, faceH);
         let nextSize = (widget.size * (diagonal + delta)) / diagonal;
         nextSize = Math.round(Math.min(SIZE_MAX, Math.max(SIZE_MIN, nextSize)));
         if (grid) nextSize = Math.max(layout.cell, Math.round((nextSize * k) / layout.cell) * layout.cell) / k;
@@ -164,12 +125,8 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
         let nextLeft = origin.left;
         let nextTop = origin.top;
 
-        if (dir === "w" || dir === "nw" || dir === "sw") {
-          nextLeft = origin.left - dw;
-        }
-        if (dir === "n" || dir === "nw" || dir === "ne") {
-          nextTop = origin.top - dh;
-        }
+        if (growsLeft(dir)) nextLeft = origin.left - dw;
+        if (growsUp(dir)) nextTop = origin.top - dh;
 
         nextLeft = Math.max(0, Math.min(viewport.w - nextDims.width, nextLeft));
         nextTop = Math.max(0, Math.min(viewport.h - nextDims.height, nextTop));
@@ -203,7 +160,7 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
       onRemove(widget.id);
       return;
     }
-    const direction = DIRECTIONS[event.key];
+    const direction = ARROW_DIRECTIONS[event.key];
     const origin = rects.get(widget.id);
     if (!direction || !origin) return;
     event.preventDefault();
@@ -273,86 +230,21 @@ export default function WidgetLayer({ widgets, layout, editing, selectedId, halo
           >
             <Clock widget={view} width={size.width} faceHeight={size.faceHeight} captionHeight={size.caption} caption={captionText(view)} halo={halo} />
             {selected && !active && (
-              <div className={cn("wl-toolbar", top < 64 && "wl-toolbar--below")} onPointerDown={(event) => event.stopPropagation()}>
+              <ElementToolbar below={top < 72}>
                 <button type="button" onClick={() => onDuplicate(widget.id)} title={t("wg.duplicate")} aria-label={t("wg.duplicate")}>
                   <Copy size={16} aria-hidden="true" />
                 </button>
                 <button type="button" onClick={() => onRemove(widget.id)} title={t("wg.remove")} aria-label={t("wg.remove")}>
                   <Trash2 size={16} aria-hidden="true" />
                 </button>
-              </div>
+              </ElementToolbar>
             )}
-            {selected && (
-              <>
-                {/* L-shaped corner brackets (like Android/OnePlus lockscreen customizer) */}
-                <div className="pointer-events-none absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-[var(--primary)] rounded-tl-lg" />
-                <div className="pointer-events-none absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-[var(--primary)] rounded-tr-lg" />
-                <div className="pointer-events-none absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-[var(--primary)] rounded-bl-lg" />
-                <div className="pointer-events-none absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-[var(--primary)] rounded-br-lg" />
-
-                {/* 4 Corner handles */}
-                <span
-                  className="absolute -top-2.5 -left-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nwse-resize z-30 transition hover:scale-125"
-                  onPointerDown={(event) => startGesture(event, widget, "nw")}
-                  title="Resize NW"
-                  aria-hidden="true"
-                />
-                <span
-                  className="absolute -top-2.5 -right-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nesw-resize z-30 transition hover:scale-125"
-                  onPointerDown={(event) => startGesture(event, widget, "ne")}
-                  title="Resize NE"
-                  aria-hidden="true"
-                />
-                <span
-                  className="absolute -bottom-2.5 -right-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nwse-resize z-30 transition hover:scale-125"
-                  onPointerDown={(event) => startGesture(event, widget, "se")}
-                  title="Resize SE"
-                  aria-hidden="true"
-                />
-                <span
-                  className="absolute -bottom-2.5 -left-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nesw-resize z-30 transition hover:scale-125"
-                  onPointerDown={(event) => startGesture(event, widget, "sw")}
-                  title="Resize SW"
-                  aria-hidden="true"
-                />
-
-                {/* 4 Edge pill handles */}
-                <span
-                  className="absolute -top-1.5 left-1/2 -translate-x-1/2 h-3 w-7 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ns-resize z-30 transition hover:scale-110"
-                  onPointerDown={(event) => startGesture(event, widget, "n")}
-                  title="Resize Top"
-                  aria-hidden="true"
-                />
-                <span
-                  className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 h-3 w-7 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ns-resize z-30 transition hover:scale-110"
-                  onPointerDown={(event) => startGesture(event, widget, "s")}
-                  title="Resize Bottom"
-                  aria-hidden="true"
-                />
-                <span
-                  className="absolute top-1/2 -left-1.5 -translate-y-1/2 h-7 w-3 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ew-resize z-30 transition hover:scale-110"
-                  onPointerDown={(event) => startGesture(event, widget, "w")}
-                  title="Resize Left"
-                  aria-hidden="true"
-                />
-                <span
-                  className="absolute top-1/2 -right-1.5 -translate-y-1/2 h-7 w-3 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ew-resize z-30 transition hover:scale-110"
-                  onPointerDown={(event) => startGesture(event, widget, "e")}
-                  title="Resize Right"
-                  aria-hidden="true"
-                />
-              </>
-            )}
+            {selected && <SelectionChrome onHandle={(event, dir) => startGesture(event, widget, dir)} />}
           </div>
         );
       })}
 
-      {guides.x.map((x) => (
-        <div key={`x${x}`} className="wl-guide wl-guide--v" style={{ left: x }} />
-      ))}
-      {guides.y.map((y) => (
-        <div key={`y${y}`} className="wl-guide wl-guide--h" style={{ top: y }} />
-      ))}
+      <GuideLines guides={guides} />
     </div>
   );
 }

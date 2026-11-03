@@ -1,6 +1,8 @@
 import {
   ArrowLeft,
   Bookmark as BookmarkIcon,
+  Code2,
+  Database,
   Info,
   Languages,
   LayoutDashboard,
@@ -12,12 +14,18 @@ import {
   WandSparkles,
   Wallpaper as WallpaperIcon,
   X,
+  Grip,
+  FlaskConical,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ComponentType } from "react";
 import AnimationSection from "./settings/AnimationSection";
 import { AboutSection, AppearanceSection, BookmarksSection, SearchSection } from "./settings/BasicSections";
+import BackupSection from "./settings/BackupSection";
+import BetterBarSection from "./settings/BetterBarSection";
+import DeveloperSection from "./settings/DeveloperSection";
+import UserscriptsSection from "./settings/UserscriptsSection";
 import FontsSection from "./settings/FontsSection";
 import HomeSection from "./settings/HomeSection";
 import LanguageSection from "./settings/LanguageSection";
@@ -25,6 +33,7 @@ import SearchBoxSection from "./settings/SearchBoxSection";
 import ThemesSection from "./settings/ThemesSection";
 import WallpaperSection from "./settings/WallpaperSection";
 import { useI18n } from "../lib/i18n";
+import { AppMenuSection } from "./settings/AppMenuSection";
 import type { SettingsSection } from "../lib/settings";
 import { cn } from "../utils/cn";
 
@@ -33,12 +42,17 @@ const SECTIONS: { id: SettingsSection; icon: LucideIcon; content: ComponentType 
   { id: "searchbox", icon: TextCursorInput, content: SearchBoxSection },
   { id: "animation", icon: WandSparkles, content: AnimationSection },
   { id: "home", icon: LayoutDashboard, content: HomeSection },
+  { id: "betterbar", icon: Search, content: BetterBarSection },
+  { id: "appmenu", icon: Grip, content: AppMenuSection },
   { id: "appearance", icon: SunMoon, content: AppearanceSection },
   { id: "themes", icon: Palette, content: ThemesSection },
   { id: "wallpaper", icon: WallpaperIcon, content: WallpaperSection },
   { id: "fonts", icon: Type, content: FontsSection },
   { id: "language", icon: Languages, content: LanguageSection },
   { id: "bookmarks", icon: BookmarkIcon, content: BookmarksSection },
+  { id: "backup", icon: Database, content: BackupSection },
+  { id: "developer", icon: FlaskConical, content: DeveloperSection },
+  { id: "scripts", icon: Code2, content: UserscriptsSection },
   { id: "about", icon: Info, content: AboutSection },
 ];
 

@@ -1,0 +1,7 @@
+App icons identify the linked services only. All names and logos are trademarks of their owners.
+
+Sources:
+- homarr-labs/dashboard-icons (Apache-2.0 collection of service logos) - most Google and Microsoft apps
+- DamoBird365/microsoft-cloud-icons - official Microsoft 365 / Power Platform product icons (Planner, Forms, Loop, ...)
+- Wikimedia Commons - Google Vids, Google Finance, Google Arts & Culture, Microsoft Store, MSN (butterfly)
+- Product favicons published by Google and Microsoft - Google Store, Microsoft Rewards

@@ -61,6 +61,12 @@ export type ClockTime = {
   monthLong: string;
   date: string;
   dayProgress: number;
+  /** Numeric calendar date in the widget's time zone (month is 1–12). */
+  year: number;
+  month: number;
+  dayOfMonth: number;
+  /** BCP-47 language used for formatting. */
+  lang: string;
   num: (value: number, minDigits?: number) => string;
 };
 
@@ -169,6 +175,10 @@ export function getClockTime(time: number, lang: string, tz: string, cycle: Hour
     ...calendar,
     dayPeriod: h12 ? calendar.dayPeriod : "",
     dayProgress: (h * 3600 + m * 60 + s) / 86400,
+    year: part("year"),
+    month: part("month"),
+    dayOfMonth: part("day"),
+    lang,
     num,
   };
 }

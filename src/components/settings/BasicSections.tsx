@@ -1,9 +1,10 @@
-import { EyeOff, Globe, History, Monitor, Moon, Plus, Sun, Trash2, Type, Wallpaper as WallpaperIcon } from "lucide-react";
+import { History, Monitor, Moon, Plus, Sun, Trash2, Wallpaper as WallpaperIcon } from "lucide-react";
 import { useSettingsCtx } from "./context";
+import LogoStudio from "./LogoStudio";
 import LoadingIndicator from "../LoadingIndicator";
-import { BUTTON, BUTTON_PRIMARY, CARD, ChoiceList, INPUT, SettingsGroup, ToggleRow } from "../ui";
+import { BUTTON, BUTTON_PRIMARY, CARD, ChoiceList, SettingsGroup, ToggleRow } from "../ui";
 import { useI18n } from "../../lib/i18n";
-import { getHost, type LogoMode, type ThemeMode } from "../../lib/settings";
+import { getHost, type ThemeMode } from "../../lib/settings";
 import { cn } from "../../utils/cn";
 
 export function SearchSection() {
@@ -58,26 +59,7 @@ export function AppearanceSection() {
   return (
     <div className="space-y-8">
       <SettingsGroup title={t("ap.logo")} description={t("ap.logoDesc")}>
-        <ChoiceList<LogoMode>
-          label={t("ap.logo")}
-          value={settings.logo}
-          onChange={(logo) => update({ logo })}
-          options={[
-            { value: "google", label: "Google", description: fontTheme === "matrix" ? t("ap.logo.googleMatrix") : t("ap.logo.googleDesc"), icon: Globe },
-            { value: "none", label: t("ap.logo.none"), icon: EyeOff },
-            { value: "text", label: t("ap.logo.text"), description: t("ap.logo.textDesc"), icon: Type },
-          ]}
-        />
-        {settings.logo === "text" && (
-          <input
-            value={settings.logoText}
-            maxLength={40}
-            onChange={(event) => update({ logoText: event.target.value })}
-            placeholder={t("ap.logo.placeholder")}
-            aria-label={t("ap.logo.text")}
-            className={cn(INPUT, "mt-3")}
-          />
-        )}
+        <LogoStudio settings={settings} update={update} />
       </SettingsGroup>
 
       <SettingsGroup title={t("ap.mode")} description={t("ap.modeDesc")}>

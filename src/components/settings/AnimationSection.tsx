@@ -111,7 +111,14 @@ export default function AnimationSection() {
           </div>
         </SettingsGroup>
 
-        <SettingsGroup title={t("an.exit")}>
+        <SettingsGroup title={t("an.paste")}>
+        <div className={card}>
+          <ToggleRow title={t("an.paste")} description={t("an.pasteDesc")} checked={a.pasteAnim} onChange={set("pasteAnim")} />
+          <ToggleRow title={t("an.select")} description={t("an.selectDesc")} checked={a.selectParticles} onChange={set("selectParticles")} />
+        </div>
+      </SettingsGroup>
+
+      <SettingsGroup title={t("an.exit")}>
           <div className={cn(CARD, "p-5")}>
             <Segmented
               label={t("an.exit")}

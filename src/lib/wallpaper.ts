@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { idbDelete, idbGet, idbSet } from "./idb";
 import type { Settings } from "./settings";
 
-const FILE_KEY = "wallpaper";
+export const WALLPAPER_FILE_KEY = "wallpaper";
 /** Longest edge after downscaling — plenty for a 2.5K display, keeps storage and memory small. */
 const MAX_EDGE = 2560;
 /** Originals up to this size are stored untouched (no re-encoding). */
@@ -60,7 +60,7 @@ export function useWallpaper(settings: Settings, setSettings: Dispatch<SetStateA
     }
     let cancelled = false;
     let objectUrl: string | null = null;
-    idbGet<Blob>(FILE_KEY)
+    idbGet<Blob>(WALLPAPER_FILE_KEY)
       .then((blob) => {
         if (cancelled) return;
         if (blob) {
@@ -92,7 +92,7 @@ export function useWallpaper(settings: Settings, setSettings: Dispatch<SetStateA
       setStatus({ kind: "busy" });
       try {
         const blob = await downscale(file);
-        await idbSet(FILE_KEY, blob);
+        await idbSet(WALLPAPER_FILE_KEY, blob);
         setFileVersion((version) => version + 1);
         setSettings((current) => ({ ...current, wallpaperSource: "file" }));
         setStatus({ kind: "idle" });
@@ -125,7 +125,7 @@ export function useWallpaper(settings: Settings, setSettings: Dispatch<SetStateA
     setStatus({ kind: "idle" });
     if (hadFile) {
       try {
-        await idbDelete(FILE_KEY);
+        await idbDelete(WALLPAPER_FILE_KEY);
       } catch {
         // Nothing to recover from: the wallpaper is already switched off.
       }
@@ -134,7 +134,9 @@ export function useWallpaper(settings: Settings, setSettings: Dispatch<SetStateA
 
   const url = settings.wallpaperSource === "file" ? fileUrl : settings.wallpaperSource === "url" ? settings.wallpaperUrl || null : null;
 
-  return { url, status, missingFile, uploadFile, applyUrl, remove };
+  const refresh = useCallback(() => setFileVersion((version) => version + 1), []);
+
+  return { url, status, missingFile, uploadFile, applyUrl, remove, refresh };
 }
 
 export type WallpaperController = ReturnType<typeof useWallpaper>;

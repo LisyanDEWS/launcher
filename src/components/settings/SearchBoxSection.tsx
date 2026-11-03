@@ -203,6 +203,27 @@ export default function SearchBoxSection() {
           />
           {s.aiButton && (
             <>
+              <FieldRow label={t("sb.aiMode")} hint={t("sb.aiModeDesc")}>
+                <Segmented
+                  label={t("sb.aiMode")}
+                  value={s.aiMode}
+                  onChange={set("aiMode")}
+                  options={[
+                    { value: "button", label: t("sb.aiMode.button") },
+                    { value: "toggle", label: t("sb.aiMode.toggle") },
+                  ]}
+                />
+              </FieldRow>
+              {s.aiMode === "toggle" && (
+                <>
+                  <ToggleRow
+                    title={t("sb.aiDefaultOn")}
+                    description={t("sb.aiDefaultOnDesc")}
+                    checked={s.aiDefaultOn}
+                    onChange={set("aiDefaultOn")}
+                  />
+                </>
+              )}
               <SliderRow
                 label={t("sb.aiButtonSize")}
                 value={s.aiButtonSize}
@@ -250,6 +271,7 @@ export default function SearchBoxSection() {
           )}
         </div>
       </SettingsGroup>
+        <p className="mt-2 px-1 text-xs leading-5 text-[var(--muted)]">{t("sb.attachHint")}</p>
 
       <div className="flex justify-end">
         <button type="button" onClick={() => update({ searchStyle: { ...DEFAULT_SEARCH_STYLE } })} className={BUTTON}>

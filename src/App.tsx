@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { AlertCircle, CornerDownLeft, History, LayoutDashboard, Plus, Search, Settings as SettingsIcon, X } from "lucide-react";
+import AppMenu from "./components/AppMenu";
+import { AppShapeDefs } from "./components/AppShapes";
+import BetterSearchBar from "./components/BetterSearchBar";
 import BookmarkDialog from "./components/BookmarkDialog";
 import { BookmarkIcon } from "./components/BookmarkIcon";
 import ContextMenu, { type ContextMenuData } from "./components/ContextMenu";
-import LoadingIndicator from "./components/LoadingIndicator";
 import Logo from "./components/Logo";
 import SearchBox, { searchHints } from "./components/SearchBox";
 import SettingsScreen from "./components/SettingsScreen";
@@ -15,12 +17,15 @@ import MovableElement from "./components/widgets/MovableElement";
 import WidgetLayer from "./components/widgets/WidgetLayer";
 import { FontThemeContext } from "./lib/font-theme";
 import { I18nContext, detectLanguage, getLanguage, isRtl, matrixSupport, translate, type I18n, type MessageKey, type Vars } from "./lib/i18n";
+import { idbDelete, idbSet } from "./lib/idb";
+import type { RestorePayload } from "./lib/backup";
+import { useThemedFavicon } from "./lib/favicon";
+import { openIncognito } from "./lib/incognito";
 import {
   BOOKMARKS_KEY,
   HISTORY_KEY,
   SETTINGS_KEY,
-  getHost,
-  normalizeUrl,
+  safeWebUrl,
   persist,
   readBookmarks,
   readHistory,
@@ -31,8 +36,9 @@ import {
   type Settings,
   type SettingsSection,
 } from "./lib/settings";
+import { stage, useStageMode } from "./lib/stage";
 import { PALETTE_VARS, PRESET_COLORS, analyzeWallpaper, buildPalette } from "./lib/theme";
-import { useWallpaper } from "./lib/wallpaper";
+import { useWallpaper, WALLPAPER_FILE_KEY } from "./lib/wallpaper";
 import { useWidgetActions } from "./lib/widgets";
 import { cn } from "./utils/cn";
 
@@ -40,9 +46,6 @@ type SuggestionGroup = { label: string; kind: "history" | "popular" | "similar";
 
 /** Theme snapshot read by the inline script in index.html before the first paint. */
 const BOOT_KEY = "lisyan_boot";
-
-const INPUT =
-  "h-14 rounded-2xl bg-[var(--surface-container-high)] px-5 text-[var(--fg)] outline-none transition focus:bg-[var(--surface-container-highest)] placeholder:text-[var(--muted)]";
 
 function useSystemDark() {
   const [dark, setDark] = useState(() => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -53,24 +56,6 @@ function useSystemDark() {
     return () => media.removeEventListener("change", update);
   }, []);
   return dark;
-}
-
-function Favicon({ url }: { url: string }) {
-  const [status, setStatus] = useState<"loading" | "loaded" | "failed">("loading");
-  const domain = getHost(url);
-  return (
-    <>
-      {status === "loading" && <LoadingIndicator indicatorSize={24} containerWidth={28} containerHeight={28} />}
-      {status === "failed" && <span className="text-xs font-bold text-[var(--muted)]">{domain.slice(0, 2).toUpperCase()}</span>}
-      <img
-        src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
-        alt=""
-        onLoad={() => setStatus("loaded")}
-        onError={() => setStatus("failed")}
-        className={cn("h-7 w-7 grayscale transition group-hover:grayscale-0", status !== "loaded" && "hidden")}
-      />
-    </>
-  );
 }
 
 export default function App() {
@@ -93,6 +78,14 @@ export default function App() {
   const [selectedWidget, setSelectedWidget] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [showSearchRemoveDialog, setShowSearchRemoveDialog] = useState(false);
+  // AI search stays on until switched off (desktop-friendly), and routes every search through it.
+  const [aiOn, setAiOn] = useState(settings.searchStyle.aiMode === "toggle" && settings.searchStyle.aiDefaultOn);
+  // A photo or file the user attached to search by it instead of typing.
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  // The Better Search Bar has its own query so the two bars never fight over one input.
+  const [barQuery, setBarQuery] = useState("");
+  const [incognitoOn, setIncognitoOn] = useState(false);
   const editState = useRef({ editing: false, selected: null as string | null });
   const widgetActions = useWidgetActions(setSettings);
 
@@ -165,6 +158,9 @@ export default function App() {
     if (palette) for (const [name, value] of Object.entries(palette)) root.style.setProperty(name, value);
     persist(BOOT_KEY, { theme, fontTheme, lang, dir, vars: palette });
   }, [dark, fontTheme, lang, dir, palette, settings.uiAnimation]);
+
+  // The tab's own favicon follows the palette (this is also what the new-tab page in the extension shows).
+  useThemedFavicon([palette, dark]);
 
   useEffect(() => persist(BOOKMARKS_KEY, bookmarks), [bookmarks]);
   useEffect(() => persist(SETTINGS_KEY, settings), [settings]);
@@ -390,6 +386,65 @@ export default function App() {
   const flattened = useMemo(() => suggestionGroups.flatMap((group) => group.items), [suggestionGroups]);
   const showSuggestionList = suggestionsOpen && settings.searchSuggestions && suggestionGroups.length > 0;
 
+  /** The URL an AI search goes to; falls back to Google AI Mode when the template is not usable. */
+  const aiTarget = (term: string) => {
+    const raw = settings.searchStyle.aiButtonUrl || "https://www.google.com/search?q={q}&udm=50";
+    const safe = safeWebUrl(raw.includes("{q}") ? raw.replace("{q}", "x") : raw);
+    return safe ? raw.replace("{q}", encodeURIComponent(term)) : `https://www.google.com/search?q=${encodeURIComponent(term)}&udm=50`;
+  };
+
+  /**
+   * Sends a photo straight to Google Lens.
+   *
+   * A plain multipart form is used on purpose: the browser performs the upload itself, so it is not
+   * subject to CORS the way fetch() would be. The file is placed in a real <input type="file"> via
+   * DataTransfer and the form is submitted to `lens.google.com/v3/upload`, which redirects to results.
+   */
+  const searchByImage = (file: File) => {
+    const form = document.createElement("form");
+    form.action = `https://lens.google.com/v3/upload?ep=ccm&s=&st=${Date.now()}`;
+    form.method = "POST";
+    form.enctype = "multipart/form-data";
+    form.target = "_blank";
+    form.rel = "noopener noreferrer";
+    form.style.display = "none";
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.name = "encoded_image";
+    try {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+    } catch {
+      setAttachError(isRu ? "Браузер не дал прикрепить файл" : "The browser refused the attachment");
+      return;
+    }
+
+    const dimensions = document.createElement("input");
+    dimensions.type = "hidden";
+    dimensions.name = "processed_image_dimensions";
+    dimensions.value = "1000,1000";
+
+    form.append(input, dimensions);
+    document.body.appendChild(form);
+    form.submit();
+    window.setTimeout(() => form.remove(), 1500);
+    setAttachment(null);
+  };
+
+  /** Searching with an attached file: photos go to Lens, everything else by its file name. */
+  const searchByAttachment = (file: File) => {
+    if (file.type.startsWith("image/")) {
+      // Only the form submission opens a tab — a second window.open would land on Lens twice.
+      searchByImage(file);
+      return;
+    }
+    const name = file.name.replace(/\.[a-z0-9]+$/i, "").replace(/[._-]+/g, " ").trim();
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(name)}`, "_blank", "noopener,noreferrer");
+    setAttachment(null);
+  };
+
   const runSearch = (value: string) => {
     const term = value.trim();
     if (!term) return;
@@ -400,9 +455,14 @@ export default function App() {
     setActiveSuggestion(-1);
     setGoing(true);
     const isUrl = /^https?:\/\//i.test(term) || (/^\S+\.\S{2,}$/.test(term) && !term.includes(" "));
-    window.location.assign(
-      isUrl ? normalizeUrl(term) : `https://www.google.com/search?q=${encodeURIComponent(term)}&hl=${encodeURIComponent(language.google)}`,
-    );
+    // With the AI toggle on, every search goes through AI Mode instead of plain Google.
+    const target = aiOn
+      ? aiTarget(term)
+      : isUrl
+        ? safeWebUrl(term)
+        : `https://www.google.com/search?q=${encodeURIComponent(term)}&hl=${encodeURIComponent(language.google)}`;
+    // The launcher stays put so widgets and history survive the search.
+    window.open(target, "_blank", "noopener,noreferrer");
   };
 
   const runAiSearch = (value: string) => {
@@ -414,13 +474,63 @@ export default function App() {
     setSuggestionsOpen(false);
     setActiveSuggestion(-1);
     setGoing(true);
-    const template = settings.searchStyle.aiButtonUrl || "https://www.google.com/search?q={q}&udm=50";
-    const targetUrl = template.replace("{q}", encodeURIComponent(term));
-    window.location.assign(targetUrl);
+    window.open(aiTarget(term), "_blank", "noopener,noreferrer");
   };
+
+  /** A photo picked from the gallery goes straight to Google Lens. */
+  const runGalleryImage = useCallback(
+    (file: File) => {
+      const form = document.createElement("form");
+      form.action = `https://lens.google.com/v3/upload?ep=ccm&s=&st=${Date.now()}`;
+      form.method = "POST";
+      form.enctype = "multipart/form-data";
+      form.target = "_blank";
+      form.rel = "noopener noreferrer";
+      form.style.display = "none";
+      const input = document.createElement("input");
+      input.type = "file";
+      input.name = "encoded_image";
+      try {
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+      } catch {
+        setAttachError(isRu ? "Браузер не дал прикрепить файл" : "The browser refused the attachment");
+        return;
+      }
+      const dimensions = document.createElement("input");
+      dimensions.type = "hidden";
+      dimensions.name = "processed_image_dimensions";
+      dimensions.value = "1000,1000";
+      form.append(input, dimensions);
+      document.body.appendChild(form);
+      form.submit();
+      window.setTimeout(() => form.remove(), 1500);
+    },
+    [isRu],
+  );
+
+  const runIncognito = useCallback(async () => {
+    const url = `https://www.google.com/search?q=${encodeURIComponent(barQuery.trim() || " ")}`;
+    const result = await openIncognito(url);
+    setIncognitoOn(result === "opened");
+    setToastMessage({
+      id: Date.now(),
+      text:
+        result === "opened"
+          ? t("better.incognitoOpened" as never)
+          : result === "unsupported"
+            ? t("better.incognitoUnsupported" as never)
+            : t("better.incognitoBlocked" as never),
+    });
+  }, [barQuery, t]);
 
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (attachment) {
+      searchByAttachment(attachment);
+      return;
+    }
     const selected = activeSuggestion >= 0 ? flattened[activeSuggestion] : undefined;
     runSearch(selected ?? query);
   };
@@ -463,6 +573,22 @@ export default function App() {
 
   const removeBookmark = (id: string) => setBookmarks((current) => current.filter((bookmark) => bookmark.id !== id));
 
+  const restoreBackup = useCallback(async (backup: RestorePayload) => {
+    if (backup.wallpaper) {
+      await idbSet(WALLPAPER_FILE_KEY, backup.wallpaper);
+    } else {
+      await idbDelete(WALLPAPER_FILE_KEY).catch(() => undefined);
+    }
+
+    setSettings(backup.settings);
+    setBookmarks(backup.bookmarks);
+    setHistory(backup.history);
+    persist(SETTINGS_KEY, backup.settings);
+    persist(BOOKMARKS_KEY, backup.bookmarks);
+    persist(HISTORY_KEY, backup.history);
+    wallpaper.refresh();
+  }, [wallpaper.refresh]);
+
   const settingsValue: SettingsContextValue = {
     settings,
     setSettings,
@@ -475,6 +601,7 @@ export default function App() {
     history,
     removeBookmark,
     clearHistory: () => setHistory([]),
+    restoreBackup,
     addBookmark: () => {
       setSettingsOpen(false);
       setEditingBookmark(null);
@@ -493,18 +620,52 @@ export default function App() {
   };
 
   const style = settings.searchStyle;
+  const aiMode = style.aiMode;
+  useEffect(() => {
+    if (aiMode !== "toggle") setAiOn(false);
+  }, [aiMode]);
+  const { staged, shrunk } = useStageMode(editing);
+
+  // The search box loses focus while editing (so it isn't mistaken for a selection). Give it back afterwards —
+  // but not on touch screens, where it would pop the keyboard open.
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing && !window.matchMedia("(pointer: coarse)").matches) {
+      const id = requestAnimationFrame(() => searchArea.current?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true }));
+      wasEditing.current = editing;
+      return () => cancelAnimationFrame(id);
+    }
+    wasEditing.current = editing;
+  }, [editing]);
+  const stageRef = useCallback((el: HTMLDivElement | null) => {
+    stage.el = el;
+  }, []);
   // Over a wallpaper the surfaces turn into frosted glass.
   const surface = hasWallpaper ? "bg-[var(--glass)] backdrop-blur-xl" : "bg-[var(--surface-container-high)]";
 
   return (
     <I18nContext.Provider value={i18n}>
       <FontThemeContext.Provider value={fontTheme}>
+        <AppShapeDefs />
         {settingsOpen ? (
           <SettingsContext.Provider value={settingsValue}>
             <SettingsScreen activeSection={activeSection} setActiveSection={setActiveSection} onClose={() => setSettingsOpen(false)} />
           </SettingsContext.Provider>
         ) : (
-          <div className="relative min-h-screen px-6 pb-16">
+          <>
+            {staged && (
+              <div className={cn("stage-backdrop", !editing && "is-out")} onPointerDown={() => editing && setSelectedWidget(null)} aria-hidden="true">
+                {wallpaper.url && <WallpaperLayer key={wallpaper.url} url={wallpaper.url} dim={62} blur={26} grayscale={false} />}
+              </div>
+            )}
+            <div
+              ref={stageRef}
+              className={cn("home-stage relative min-h-screen px-6 pb-24", staged && "is-staged", shrunk && "is-shrunk")}
+              // Tapping empty space on the card deselects (the widget layer no longer catches the pointer for us).
+              onPointerDown={(event) => {
+                if (editing && !(event.target as HTMLElement).closest("[data-widget-id]")) setSelectedWidget(null);
+              }}
+            >
             {wallpaper.url && (
               <WallpaperLayer
                 key={wallpaper.url}
@@ -533,37 +694,35 @@ export default function App() {
             />
 
             {!editing && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => enterEdit()}
-                  title={t("home.edit")}
-                  aria-label={t("home.edit")}
-                  className={cn(
-                    "fixed end-[76px] top-5 z-20 flex h-12 w-12 items-center justify-center rounded-full transition-all duration-300 hover:rounded-2xl",
-                    surface,
-                  )}
-                >
-                  <LayoutDashboard size={20} strokeWidth={1.9} aria-hidden="true" />
-                </button>
+              <div className="fixed end-5 top-5 z-30 flex items-center gap-2">
+                <AppMenu
+                  menu={settings.appMenu}
+                  onChange={(patch) => setSettings((s) => ({ ...s, appMenu: { ...s.appMenu, ...patch } }))}
+                  translucent={hasWallpaper}
+                  buttonClassName={cn("flex h-11 w-11 items-center justify-center rounded-full transition-all duration-300 hover:rounded-2xl", surface)}
+                />
                 <button
                   type="button"
                   onClick={() => setSettingsOpen(true)}
                   title={t("settings.open")}
                   aria-label={t("settings.open")}
-                  className={cn(
-                    "fixed end-5 top-5 z-20 flex h-12 w-12 items-center justify-center rounded-full transition-all duration-300 hover:rotate-90 hover:rounded-2xl",
-                    surface,
-                  )}
+                  className={cn("flex h-11 w-11 items-center justify-center rounded-full transition-all duration-300 hover:rotate-90 hover:rounded-2xl", surface)}
                 >
                   <SettingsIcon size={21} strokeWidth={1.9} aria-hidden="true" />
                 </button>
-              </>
+              </div>
+            )}
+
+            {!editing && (
+              <button type="button" onClick={() => enterEdit()} className="edit-home-button">
+                <LayoutDashboard size={15} strokeWidth={2} aria-hidden="true" />
+                <span>{t("home.editShort")}</span>
+              </button>
             )}
 
             {/* Movable & Customizable Search bar, Logo, and other buttons */}
             <main
-              className={cn("relative z-10 flex w-full flex-col items-center px-3 transition-opacity duration-300", editing && "pointer-events-auto")}
+              className={cn("home-column relative z-10 flex w-full flex-col items-center gap-5 px-3 transition-opacity duration-300 sm:gap-6", editing && "pointer-events-auto")}
               style={{ paddingTop: settings.launcherLayout.search.custom ? "4vh" : `max(64px, ${style.offsetTop}vh)` }}
             >
               {/* Movable Logo */}
@@ -612,8 +771,10 @@ export default function App() {
                   }));
                   setSelectedWidget(null);
                 }}
+                onEnterEdit={() => enterEdit()}
                 onDragState={setDragging}
-                className={cn("w-full mb-6", hasWallpaper && "wp-text")}
+                onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, logo: { ...s.launcherLayout.logo, visible: true } } }))}
+                className={cn("w-full", hasWallpaper && "wp-text")}
               >
                 <Logo settings={settings} dark={dark} />
               </MovableElement>
@@ -656,8 +817,10 @@ export default function App() {
                   }));
                 }}
                 onRemove={() => setShowSearchRemoveDialog(true)}
+                onEnterEdit={() => enterEdit()}
                 onDragState={setDragging}
-                className="w-full relative z-20"
+                onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, search: { ...s.launcherLayout.search, visible: true } } }))}
+                className="relative z-20 w-full"
               >
                 <div ref={searchArea} className={cn("relative z-10 w-full", !editing && "pointer-events-auto")} style={{ maxWidth: settings.launcherLayout.search.width || style.width }}>
                   <form onSubmit={handleSearch} role="search">
@@ -672,12 +835,26 @@ export default function App() {
                         setActiveSuggestion(-1);
                       }}
                       onAiSearch={runAiSearch}
+                      aiOn={aiOn}
+                      onAiToggle={() => setAiOn((v) => !v)}
+                      attachment={attachment}
+                      attachError={attachError}
+                      onAttach={(file) => {
+                        setAttachError(null);
+                        if (file && file.size > 20 * 1024 * 1024) {
+                          setAttachError(isRu ? "Файл больше 20 МБ — выберите меньше" : "That file is larger than 20 MB — choose a smaller one");
+                          return;
+                        }
+                        setAttachment(file);
+                      }}
+                      onGallery={runGalleryImage}
+                      onVoice={(text) => setQuery(text)}
                       placeholder={style.placeholder.trim() || t("search.placeholder")}
                       hints={searchHints(t)}
                       submitLabel={t("search.button")}
                       going={going}
                       translucent={hasWallpaper}
-                      autoFocus
+                      autoFocus={!editing}
                       inputProps={{
                         role: "combobox",
                         "aria-autocomplete": "list",
@@ -736,6 +913,95 @@ export default function App() {
                 </div>
               </MovableElement>
 
+              {/* Better Search Bar — a second, fully customisable bar. */}
+              <MovableElement
+                id="__system_better_bar__"
+                title={t("better.title")}
+                position={settings.launcherLayout.betterBar}
+                homeLayout={settings.homeLayout}
+                editing={editing}
+                selected={selectedWidget === "__system_better_bar__"}
+                onSelect={() => setSelectedWidget("__system_better_bar__")}
+                onMove={(x, y) => {
+                  setSettings((s) => ({
+                    ...s,
+                    launcherLayout: {
+                      ...s.launcherLayout,
+                      betterBar: { ...s.launcherLayout.betterBar, custom: true, x, y },
+                    },
+                  }));
+                }}
+                onResize={(width, scale) => {
+                  setSettings((s) => ({
+                    ...s,
+                    launcherLayout: {
+                      ...s.launcherLayout,
+                      betterBar: { ...s.launcherLayout.betterBar, width, scale },
+                    },
+                  }));
+                }}
+                onResetCenter={() => {
+                  setSettings((s) => ({
+                    ...s,
+                    launcherLayout: {
+                      ...s.launcherLayout,
+                      betterBar: { ...s.launcherLayout.betterBar, custom: false },
+                    },
+                  }));
+                }}
+                onRemove={() => {
+                  setSettings((s) => ({
+                    ...s,
+                    launcherLayout: {
+                      ...s.launcherLayout,
+                      betterBar: { ...s.launcherLayout.betterBar, visible: false },
+                    },
+                  }));
+                  setSelectedWidget(null);
+                }}
+                onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, betterBar: { ...s.launcherLayout.betterBar, visible: true } } }))}
+                onDragState={setDragging}
+                className="relative z-10 w-full"
+              >
+                <div className="relative z-10 w-full" style={{ maxWidth: settings.launcherLayout.betterBar.width || 672 }}>
+                  <BetterSearchBar
+                    config={settings.launcherLayout.betterBar.config}
+                    widgets={settings.widgets}
+                    value={barQuery}
+                    onValueChange={setBarQuery}
+                    onSubmit={(text) => {
+                      const target = settings.launcherLayout.betterBar.config.aiOn
+                        ? `https://www.google.com/search?q=${encodeURIComponent(text)}&udm=50`
+                        : `https://www.google.com/search?q=${encodeURIComponent(text)}`;
+                      window.open(target, "_blank", "noopener,noreferrer");
+                    }}
+                    aiOn={settings.launcherLayout.betterBar.config.aiOn}
+                    onAiToggle={() =>
+                      setSettings((s) => ({
+                        ...s,
+                        launcherLayout: {
+                          ...s.launcherLayout,
+                          betterBar: { ...s.launcherLayout.betterBar, config: { ...s.launcherLayout.betterBar.config, aiOn: !s.launcherLayout.betterBar.config.aiOn } },
+                        },
+                      }))
+                    }
+                    incognitoOn={incognitoOn}
+                    onIncognitoToggle={() => void runIncognito()}
+                    attachment={attachment}
+                    attachError={attachError}
+                    onAttach={(file) => {
+                      setAttachError(null);
+                      if (file && file.size > 20 * 1024 * 1024) {
+                        setAttachError(isRu ? "Файл больше 20 МБ — выберите меньше" : "That file is larger than 20 MB — choose a smaller one");
+                        return;
+                      }
+                      setAttachment(file);
+                    }}
+                    going={going}
+                  />
+                </div>
+              </MovableElement>
+
               {/* Movable Bookmarks and Action Buttons */}
               <MovableElement
                 id="__system_buttons__"
@@ -782,11 +1048,10 @@ export default function App() {
                   }));
                   setSelectedWidget(null);
                 }}
+                onEnterEdit={() => enterEdit()}
                 onDragState={setDragging}
-                className={cn(
-                  "w-full relative z-10",
-                  settings.launcherLayout.search.custom ? "mt-24 sm:mt-32" : "mt-8 sm:mt-12"
-                )}
+                onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, buttons: { ...s.launcherLayout.buttons, visible: true } } }))}
+                className="relative z-10 w-full"
               >
                 <div
                   className="grid w-full gap-x-2 gap-y-4 max-w-full justify-center max-sm:[--btn-cols:4]"
@@ -894,11 +1159,10 @@ export default function App() {
                   }));
                   setSelectedWidget(null);
                 }}
+                onEnterEdit={() => enterEdit()}
                 onDragState={setDragging}
-                className={cn(
-                  "w-full relative z-10",
-                  settings.launcherLayout.search.custom ? "mt-6 sm:mt-8" : "mt-4 sm:mt-6"
-                )}
+                onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, addButton: { ...s.launcherLayout.addButton, visible: true } } }))}
+                className="relative z-10 w-full"
               >
                 <div
                   className="flex items-center justify-center w-full"
@@ -925,6 +1189,7 @@ export default function App() {
                 </div>
               </MovableElement>
             </main>
+            </div>
 
             {editing && (
               <EditChrome
@@ -955,6 +1220,8 @@ export default function App() {
                 onRequestRemoveSearch={() => setShowSearchRemoveDialog(true)}
                 onSelect={setSelectedWidget}
                 onExit={exitEdit}
+                settings={settings}
+                onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))}
               />
             )}
 
@@ -1086,7 +1353,7 @@ export default function App() {
                 }}
               />
             )}
-          </div>
+          </>
         )}
 
         {toastMessage && (

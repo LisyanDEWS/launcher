@@ -1,19 +1,14 @@
+import SandboxHtmlFrame from "../SandboxHtmlFrame";
 import { useState, useMemo } from "react";
 import {
   Code2,
   Eye,
-  Sparkles,
   Copy,
   Check,
-  RotateCcw,
-  Plus,
   X,
-  Play,
   Monitor,
   Smartphone,
   Tablet,
-  Sun,
-  Moon,
 } from "lucide-react";
 import { useI18n } from "../../lib/i18n";
 import { useWeather } from "../../lib/weather";
@@ -418,15 +413,11 @@ export default function HtmlWidgetWorkspace({ initialWidget, onSave, onClose }: 
 
           {/* Live Preview Stage */}
           <div className="flex flex-1 items-center justify-center p-6 overflow-auto bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-800/20 via-zinc-950 to-zinc-950">
-            <div
-              className={`transition-all duration-300 ${
-                styleVariant === "matrix" ? "font-['LED_Dot-Matrix',monospace]" : ""
-              }`}
-              style={{
-                width: `${previewWidth}px`,
-                minHeight: "220px",
-              }}
-              dangerouslySetInnerHTML={{ __html: evaluatedCode }}
+            <SandboxHtmlFrame
+              html={evaluatedCode}
+              fontFamily={styleVariant === "matrix" ? "'LED Dot-Matrix', monospace" : undefined}
+              title="Preview"
+              style={{ width: `${previewWidth}px`, minHeight: "220px" }}
             />
           </div>
 

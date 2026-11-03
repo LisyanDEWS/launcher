@@ -4,6 +4,14 @@ export type ThemeMode = "system" | "light" | "dark" | "wallpaper";
 export type LogoMode = "google" | "none" | "text";
 export type FontTheme = "m3" | "matrix";
 export type LogoFont = "theme" | "sans" | "matrix";
+export const LOGO_STYLES = ["classic", "expressive", "pills", "shape", "chip", "duotone", "outline", "dots", "mark", "stack", "matrix"] as const;
+export type LogoStyle = (typeof LOGO_STYLES)[number];
+export const LOGO_COLORS = ["colorful", "theme", "primary", "tertiary", "mono"] as const;
+export type LogoColor = (typeof LOGO_COLORS)[number];
+export const LOGO_ANIMATIONS = ["none", "rise", "wave", "bounce"] as const;
+export type LogoAnimation = (typeof LOGO_ANIMATIONS)[number];
+export const LOGO_SUBTITLES = ["none", "greeting", "date", "custom"] as const;
+export type LogoSubtitle = (typeof LOGO_SUBTITLES)[number];
 export type WallpaperSource = "none" | "file" | "url";
 export type ColorSource = "mono" | "wallpaper" | "preset" | "custom";
 export type SchemeVariant = "tonal" | "expressive" | "vibrant" | "fidelity";
@@ -19,6 +27,11 @@ export type SettingsSection =
   | "fonts"
   | "language"
   | "bookmarks"
+  | "betterbar"
+  | "appmenu"
+  | "backup"
+  | "developer"
+  | "scripts"
   | "about";
 export const BOOKMARK_SHAPES = ["circle", "squircle", "rounded", "teardrop", "pebble", "flower"] as const;
 export type BookmarkShape = (typeof BOOKMARK_SHAPES)[number];
@@ -74,14 +87,18 @@ export type SearchStyle = {
   aiButtonStyle: "accent" | "tonal" | "glow" | "minimal";
   aiButtonIcon: "sparkles" | "bot" | "brain" | "zap";
   aiButtonUrl: string;
+  /** button = one-shot action; toggle = stays on and re-routes every search through AI. */
+  aiMode: AiMode;
+  /** Start with the AI toggle turned on. */
+  aiDefaultOn: boolean;
 };
 
 /* ---------- text animation ---------- */
 
 export const ANIM_PRESET_IDS = ["subtle", "expressive", "bouncy", "cinematic", "decode", "off"] as const;
 export type AnimPresetId = (typeof ANIM_PRESET_IDS)[number];
-export const ENTER_EFFECTS = ["none", "fade", "rise", "drop", "pop", "blur", "flip", "wave", "scramble", "glow"] as const;
-export const EXIT_EFFECTS = ["none", "fade", "fall", "rise", "shrink", "blur", "fly", "dissolve"] as const;
+export const ENTER_EFFECTS = ["none", "fade", "rise", "drop", "pop", "blur", "flip", "wave", "scramble", "glow", "ink", "reveal", "stretch", "slide", "assemble", "tilt"] as const;
+export const EXIT_EFFECTS = ["none", "fade", "fall", "rise", "shrink", "blur", "fly", "dissolve", "shatter", "swirl", "mist", "zoom", "particles", "melt"] as const;
 export const EASINGS = ["emphasized", "spring", "bouncy", "smooth", "linear"] as const;
 export const CARETS = ["native", "bar", "block", "underline"] as const;
 export const BLINKS = ["blink", "fade", "solid"] as const;
@@ -98,6 +115,10 @@ export type TextAnim = {
   intensity: number;
   easing: Easing;
   highlight: boolean;
+  /** Flourish when text is pasted or the whole value is replaced at once. */
+  pasteAnim: boolean;
+  /** Small particles while text is selected. */
+  selectParticles: boolean;
   caret: (typeof CARETS)[number];
   caretSmooth: boolean;
   caretBlink: (typeof BLINKS)[number];
@@ -133,19 +154,103 @@ export const CLOCK_FACES = [
   "calendar",
   "glance",
   "progress",
+  // Material You 2025 set
+  "m3_pill",
+  "m3_tiles",
+  "m3_ring",
+  "m3_chip",
+  "m3_scallop",
+  "m3_gem",
+  "m3_arc",
+  "m3_dot",
+  // Calendars
+  "cal_month",
+  "cal_day",
+  "cal_week",
+  "cal_year",
+  "m3_daybar",
+  "m3_weekstrip",
+  "m3_stacked",
+  "m3_datering",
+  "m3_chips",
 ] as const;
 export type ClockFaceId = (typeof CLOCK_FACES)[number];
 
 export const WEATHER_FACES = [
-  "w01_sunny",
-  "w02_partly_cloudy",
-  "w12_humidity_ring",
-  "w15_rain_chance",
+  "m3w_now",
+  "m3w_shape",
+  "m3w_pill",
+  "m3w_details",
+  "m3w_hourly",
+  "m3w_daily",
+  "m3w_rain",
+  "m3w_sun",
+  "m3w_wind",
+  "m3w_humidity",
+  "m3w_feels",
+  "m3w_uv",
+  "m3w_air",
+  "m3w_moon",
+  "m3w_combo",
 ] as const;
+
+/** Older weather face ids → their Material replacement (keeps saved widgets working). */
+export const LEGACY_WEATHER_FACES: Record<string, (typeof WEATHER_FACES)[number]> = {
+  w01_sunny: "m3w_now",
+  w02_partly_cloudy: "m3w_details",
+  w03_rainy: "m3w_rain",
+  w04_thunderstorm: "m3w_now",
+  w05_snowfall: "m3w_now",
+  w06_clear_night: "m3w_moon",
+  w07_windy: "m3w_wind",
+  w08_foggy: "m3w_now",
+  w09_hot_humid: "m3w_feels",
+  w10_uv: "m3w_uv",
+  w11_wind_compass: "m3w_wind",
+  w12_humidity_ring: "m3w_humidity",
+  w13_aqi: "m3w_air",
+  w14_pressure: "m3w_details",
+  w15_rain_chance: "m3w_rain",
+  w16_pollen: "m3w_air",
+  w17_feels_like: "m3w_feels",
+  w18_sun_cycle: "m3w_sun",
+  w19_moon_phase: "m3w_moon",
+  w20_forecast_5d: "m3w_daily",
+  w21_hourly: "m3w_hourly",
+  w22_temp_trend: "m3w_hourly",
+  w23_weekly_rain: "m3w_daily",
+  w24_alert: "m3w_pill",
+  w25_city_hero: "m3w_shape",
+  weather_glyph: "m3w_now",
+  weather_classic: "m3w_now",
+  weather_minimal: "m3w_pill",
+  weather_pill: "m3w_pill",
+  weather_compact: "m3w_shape",
+  weather_forecast_5d: "m3w_daily",
+  weather_hourly: "m3w_hourly",
+  weather_gauge: "m3w_uv",
+  weather_wind_compass: "m3w_wind",
+  weather_sun_cycle: "m3w_sun",
+  weather_air_quality: "m3w_air",
+  weather_humidity_rain: "m3w_humidity",
+  weather_pressure_baro: "m3w_details",
+  weather_combo_clock: "m3w_combo",
+  weather_moon_phase: "m3w_moon",
+  weather_comfort_index: "m3w_feels",
+  weather_weekly_table: "m3w_daily",
+};
 export type WeatherFaceId = (typeof WEATHER_FACES)[number];
 
 export const BOOKMARK_LAYOUTS = ["1x1", "2x1", "2x2", "4x1", "4x2"] as const;
 export type BookmarksLayout = (typeof BOOKMARK_LAYOUTS)[number];
+/** Plain-language names for folder sizes: [English, Russian]. Tile count in brackets. */
+export const BOOKMARK_LAYOUT_LABELS: Record<BookmarksLayout, [string, string]> = {
+  "1x1": ["Small · 4", "Маленькая · 4"],
+  "2x1": ["Row · 4", "Ряд · 4"],
+  "2x2": ["Medium · 6", "Средняя · 6"],
+  "4x1": ["Long row · 7", "Длинный ряд · 7"],
+  "4x2": ["Large · 12", "Большая · 12"],
+};
 
 export const WIDGET_COLORS = ["primary", "secondary", "tertiary", "neutral"] as const;
 export const SECOND_MODES = ["off", "tick", "sweep"] as const;
@@ -233,6 +338,21 @@ export type LauncherLayout = {
   search: ElementPosition;
   buttons: ButtonsPosition;
   addButton: ElementPosition;
+  /** The secondary "Better Search Bar" element. */
+  betterBar: ElementPosition & { config: BetterBarConfig };
+};
+
+export const DEFAULT_BETTER_BAR: BetterBarConfig = {
+  slots: [
+    { kind: "ai", label: "" },
+    { kind: "incognito", label: "" },
+  ],
+  height: 56,
+  radius: 28,
+  attach: true,
+  voice: true,
+  placeholder: "",
+  aiOn: true,
 };
 
 export const DEFAULT_LAUNCHER_LAYOUT: LauncherLayout = {
@@ -240,6 +360,7 @@ export const DEFAULT_LAUNCHER_LAYOUT: LauncherLayout = {
   search: { custom: false, x: 0.5, y: 0.28, width: 672, scale: 100, visible: true },
   buttons: { custom: false, x: 0.5, y: 0.44, width: 672, scale: 100, visible: true, columns: 6, iconSize: 56, showAddButton: false },
   addButton: { custom: false, x: 0.5, y: 0.60, width: 220, scale: 100, visible: false },
+  betterBar: { custom: false, x: 0.5, y: 0.62, width: 672, scale: 100, visible: false, config: DEFAULT_BETTER_BAR },
 };
 
 export const MAX_WIDGETS = 48;
@@ -263,7 +384,7 @@ export const DEFAULT_WIDGET: ClockWidget = {
 export const DEFAULT_WEATHER_WIDGET: WeatherWidget = {
   id: "",
   type: "weather",
-  face: "w01_sunny",
+  face: "m3w_now",
   x: 0.04,
   y: 0.38,
   size: 300,
@@ -325,6 +446,139 @@ export const DEFAULT_BOOKMARKS_WIDGET: BookmarksWidget = {
 
 export const DEFAULT_HOME_LAYOUT: HomeLayout = { mode: "free", cell: 32, showGrid: "editing", guides: true };
 
+/* ---------- app menu (the 9-dot drawer) ---------- */
+
+export const MENU_MODES = ["google", "microsoft", "both", "custom"] as const;
+export type MenuMode = (typeof MENU_MODES)[number];
+/** themed = Material-painted SVG layers; tile = full-colour logo on a tonal tile; original = bare logo. */
+export const MENU_ICON_STYLES = ["themed", "tile", "original"] as const;
+export type MenuIconStyle = (typeof MENU_ICON_STYLES)[number];
+/** Shapes for the icon container (themed / tile styles). */
+export const MENU_SHAPES = ["squircle", "circle", "rounded", "square", "cookie", "flower", "clover", "sunny"] as const;
+export type MenuShape = (typeof MENU_SHAPES)[number];
+export const MENU_COLUMNS = [3, 4, 5] as const;
+export const MENU_ICON_SIZE = { min: 32, max: 56, default: 40 } as const;
+// Favicon theming for other sites (the generated userscript).
+export const FAVICON_MODES = ["themed", "mono", "original"] as const;
+export type FaviconMode = (typeof FAVICON_MODES)[number];
+export type FaviconTheme = { mode: FaviconMode; color: string };
+export const DEFAULT_FAVICON_THEME: FaviconTheme = { mode: "themed", color: "#f5f5f7" };
+
+/** How the AI search is triggered: a one-shot button, or a persistent toggle (nicer on a desktop). */
+export const AI_MODES = ["button", "toggle"] as const;
+/** Anything a slot in the Better Search Bar can hold. */
+export const BAR_SLOT_KINDS = ["ai", "incognito", "voice", "attach", "lens", "widget", "icon"] as const;
+export type BarSlotKind = (typeof BAR_SLOT_KINDS)[number];
+
+/** A single slot: what it shows and how it looks. */
+export type BarSlot = {
+  kind: BarSlotKind;
+  /** For kind "widget": the widget id. For "icon": a lucide icon name. */
+  ref?: string;
+  /** Optional user label; falls back to the built-in one. */
+  label?: string;
+};
+
+export type BetterBarConfig = {
+  /** Two slots under the bar, in order. */
+  slots: [BarSlot, BarSlot];
+  /** Height of the bar itself (matches the main search bar by default). */
+  height: number;
+  radius: number;
+  /** Show the "+" attachment menu. */
+  attach: boolean;
+  /** Show voice input. */
+  voice: boolean;
+  placeholder: string;
+  /** Send searches through Google AI Mode. */
+  aiOn: boolean;
+};
+
+
+export type AiMode = (typeof AI_MODES)[number];
+
+export const TOOL_COLORS = ["#4285F4", "#EA4335", "#F9AB00", "#34A853", "#7C4DFF", "#00ACC1", "#F06292", "#5F6368"] as const;
+
+/** A tool the user added to their own menu. */
+export type CustomTool = {
+  id: string;
+  title: string;
+  url: string;
+  color: string;
+  /** Try the site's own icon first; fall back to a coloured letter. */
+  favicon: boolean;
+};
+
+export type AppMenuSettings = {
+  mode: MenuMode;
+  /** Which provider is shown while mode is "both". */
+  tab: "google" | "microsoft";
+  iconStyle: MenuIconStyle;
+  shape: MenuShape;
+  /** Icon box in px. */
+  iconSize: number;
+  columns: number;
+  showLabels: boolean;
+  newTab: boolean;
+  /** Ordered ids for mode "custom": catalog ids ("g.drive", "m.word") and own tools ("u.<id>"). */
+  picks: string[];
+  tools: CustomTool[];
+};
+
+export const DEFAULT_APP_MENU: AppMenuSettings = {
+  mode: "google",
+  tab: "google",
+  iconStyle: "themed",
+  shape: "squircle",
+  iconSize: MENU_ICON_SIZE.default,
+  columns: 4,
+  showLabels: true,
+  newTab: true,
+  picks: [],
+  tools: [],
+};
+
+function sanitizeFaviconTheme(raw: unknown): FaviconTheme {
+  if (!raw || typeof raw !== "object") return DEFAULT_FAVICON_THEME;
+  const r = raw as Record<string, unknown>;
+  const mode = typeof r.mode === "string" && (FAVICON_MODES as readonly string[]).includes(r.mode) ? (r.mode as FaviconMode) : DEFAULT_FAVICON_THEME.mode;
+  const color = typeof r.color === "string" && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color : DEFAULT_FAVICON_THEME.color;
+  return { mode, color };
+}
+
+function sanitizeAppMenu(raw: unknown): AppMenuSettings {
+  if (!raw || typeof raw !== "object") return DEFAULT_APP_MENU;
+  const r = raw as Record<string, unknown>;
+  const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+    typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+  const seen = new Set<string>();
+  const tools: CustomTool[] = (Array.isArray(r.tools) ? r.tools : [])
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      id: typeof item.id === "string" && item.id.trim() ? item.id.slice(0, 64) : Math.random().toString(36).slice(2, 12),
+      title: typeof item.title === "string" ? item.title.slice(0, 40) : "",
+      url: safeWebUrl(item.url),
+      color: typeof item.color === "string" && /^#[0-9a-f]{6}$/i.test(item.color) ? item.color : TOOL_COLORS[0],
+      favicon: item.favicon !== false,
+    }))
+    .filter((tool) => tool.title.trim() && tool.url.trim())
+    .filter((tool) => (seen.has(tool.id) ? false : (seen.add(tool.id), true)))
+    .slice(0, 40);
+  const picks = [...new Set((Array.isArray(r.picks) ? r.picks : []).filter((id): id is string => typeof id === "string" && id.length < 80))].slice(0, 120);
+  return {
+    mode: pick(r.mode, MENU_MODES, DEFAULT_APP_MENU.mode),
+    tab: pick(r.tab, ["google", "microsoft"] as const, "google"),
+    iconStyle: pick(r.iconStyle, MENU_ICON_STYLES, DEFAULT_APP_MENU.iconStyle),
+    shape: pick(r.shape, MENU_SHAPES, DEFAULT_APP_MENU.shape),
+    iconSize: typeof r.iconSize === "number" && Number.isFinite(r.iconSize) ? Math.round(Math.min(MENU_ICON_SIZE.max, Math.max(MENU_ICON_SIZE.min, r.iconSize))) : MENU_ICON_SIZE.default,
+    columns: typeof r.columns === "number" && Number.isFinite(r.columns) ? Math.round(Math.min(5, Math.max(3, r.columns))) : DEFAULT_APP_MENU.columns,
+    showLabels: r.showLabels !== false,
+    newTab: r.newTab !== false,
+    picks,
+    tools,
+  };
+}
+
 /* ---------- all settings ---------- */
 
 export type Settings = {
@@ -333,6 +587,11 @@ export type Settings = {
   logo: LogoMode;
   logoText: string;
   logoFont: LogoFont;
+  logoStyle: LogoStyle;
+  logoColor: LogoColor;
+  logoAnimation: LogoAnimation;
+  logoSubtitle: LogoSubtitle;
+  logoSubtitleText: string;
   fontTheme: FontTheme;
   searchSuggestions: boolean;
   colorSource: ColorSource;
@@ -358,12 +617,13 @@ export type Settings = {
   widgets: HomeWidget[];
   homeLayout: HomeLayout;
   launcherLayout: LauncherLayout;
+  appMenu: AppMenuSettings;
+  faviconTheme: FaviconTheme;
 };
 
 export const BOOKMARKS_KEY = "lisyan_bookmarks";
 export const SETTINGS_KEY = "lisyan_settings";
 export const HISTORY_KEY = "lisyan_search_history";
-export const GOOGLE_LOGO = "https://cdn.freebiesupply.com/images/large/2x/google-logo-black-transparent.png";
 
 export const DEFAULT_SEARCH_STYLE: SearchStyle = {
   preset: "expressive",
@@ -391,6 +651,8 @@ export const DEFAULT_SEARCH_STYLE: SearchStyle = {
   aiButtonStyle: "accent",
   aiButtonIcon: "sparkles",
   aiButtonUrl: "https://www.google.com/search?q={q}&udm=50",
+  aiMode: "toggle",
+  aiDefaultOn: true,
 };
 
 const SEARCH_PRESETS: Record<SearchPresetId, Partial<SearchStyle>> = {
@@ -420,6 +682,8 @@ export const DEFAULT_TEXT_ANIM: TextAnim = {
   intensity: 55,
   easing: "spring",
   highlight: false,
+  pasteAnim: true,
+  selectParticles: true,
   caret: "bar",
   caretSmooth: true,
   caretBlink: "fade",
@@ -441,7 +705,7 @@ export function applyAnimPreset(current: TextAnim, id: AnimPresetId): TextAnim {
   return { ...current, ...ANIM_PRESETS[id], preset: id };
 }
 
-type FlatSettings = Omit<Settings, "searchStyle" | "textAnim" | "widgets" | "homeLayout" | "launcherLayout">;
+type FlatSettings = Omit<Settings, "searchStyle" | "textAnim" | "widgets" | "homeLayout" | "launcherLayout" | "appMenu" | "faviconTheme">;
 
 const DEFAULT_FLAT: FlatSettings = {
   language: "auto",
@@ -449,6 +713,11 @@ const DEFAULT_FLAT: FlatSettings = {
   logo: "google",
   logoText: "LisYan",
   logoFont: "theme",
+  logoStyle: "classic",
+  logoColor: "colorful",
+  logoAnimation: "rise",
+  logoSubtitle: "none",
+  logoSubtitleText: "",
   fontTheme: "m3",
   searchSuggestions: true,
   colorSource: "mono",
@@ -475,6 +744,8 @@ export const DEFAULT_SETTINGS: Settings = {
   widgets: [],
   homeLayout: DEFAULT_HOME_LAYOUT,
   launcherLayout: DEFAULT_LAUNCHER_LAYOUT,
+  appMenu: DEFAULT_APP_MENU,
+  faviconTheme: DEFAULT_FAVICON_THEME,
 };
 
 /* ---------- schema: validation of stored data + slider ranges ---------- */
@@ -500,6 +771,11 @@ const FLAT_SCHEMA: Schema<FlatSettings> = {
   logo: oneOf(["google", "none", "text"]),
   logoText: str(40),
   logoFont: oneOf(["theme", "sans", "matrix"]),
+  logoStyle: oneOf(LOGO_STYLES),
+  logoColor: oneOf(LOGO_COLORS),
+  logoAnimation: oneOf(LOGO_ANIMATIONS),
+  logoSubtitle: oneOf(LOGO_SUBTITLES),
+  logoSubtitleText: str(60),
   fontTheme: oneOf(["m3", "matrix"]),
   searchSuggestions: BOOL,
   colorSource: oneOf(["mono", "wallpaper", "preset", "custom"]),
@@ -545,6 +821,8 @@ export const SEARCH_STYLE_SCHEMA: Schema<SearchStyle> = {
   aiButtonStyle: oneOf(["accent", "tonal", "glow", "minimal"]),
   aiButtonIcon: oneOf(["sparkles", "bot", "brain", "zap"]),
   aiButtonUrl: str(1024),
+  aiMode: oneOf(AI_MODES),
+  aiDefaultOn: BOOL,
 };
 
 export const TEXT_ANIM_SCHEMA: Schema<TextAnim> = {
@@ -558,6 +836,8 @@ export const TEXT_ANIM_SCHEMA: Schema<TextAnim> = {
   intensity: num(0, 100),
   easing: oneOf(EASINGS),
   highlight: BOOL,
+  pasteAnim: BOOL,
+  selectParticles: BOOL,
   caret: oneOf(CARETS),
   caretSmooth: BOOL,
   caretBlink: oneOf(BLINKS),
@@ -685,7 +965,8 @@ function sanitizeWidgets(raw: unknown): HomeWidget[] {
       const type = (item as { type?: string }).type;
       let widget: HomeWidget;
       if (type === "weather") {
-        widget = sanitize(item, WEATHER_WIDGET_SCHEMA, DEFAULT_WEATHER_WIDGET);
+        const legacy = LEGACY_WEATHER_FACES[(item as { face?: string }).face ?? ""];
+        widget = sanitize(legacy ? { ...item, face: legacy } : item, WEATHER_WIDGET_SCHEMA, DEFAULT_WEATHER_WIDGET);
       } else if (type === "custom_html") {
         widget = sanitize(item, CUSTOM_HTML_SCHEMA, DEFAULT_HTML_WIDGET);
       } else if (type === "bookmarks") {
@@ -716,6 +997,34 @@ function sanitizeLauncherLayout(raw: unknown): LauncherLayout {
     };
   };
 
+  const sanitizeSlot = (raw: unknown, d: BarSlot): BarSlot => {
+    if (!raw || typeof raw !== "object") return d;
+    const r = raw as Record<string, unknown>;
+    const kind = (BAR_SLOT_KINDS as readonly string[]).includes(r.kind as string) ? (r.kind as BarSlotKind) : d.kind;
+    const ref = typeof r.ref === "string" ? r.ref.slice(0, 80) : undefined;
+    const label = typeof r.label === "string" ? r.label.slice(0, 40) : undefined;
+    return { kind, ref, label };
+  };
+
+  const sanitizeBetterBar = (raw: unknown, d: LauncherLayout["betterBar"]): LauncherLayout["betterBar"] => {
+    const base = sanitizePos(raw, d);
+    const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const config = (r.config && typeof r.config === "object" ? r.config : {}) as Record<string, unknown>;
+    const slots = Array.isArray(config.slots) ? config.slots : [];
+    return {
+      ...base,
+      config: {
+        slots: [sanitizeSlot(slots[0], d.config.slots[0]), sanitizeSlot(slots[1], d.config.slots[1])],
+        height: typeof config.height === "number" && Number.isFinite(config.height) ? Math.min(96, Math.max(44, Math.round(config.height))) : d.config.height,
+        radius: typeof config.radius === "number" && Number.isFinite(config.radius) ? Math.min(48, Math.max(0, Math.round(config.radius))) : d.config.radius,
+        attach: config.attach !== false,
+        voice: config.voice !== false,
+        placeholder: typeof config.placeholder === "string" ? config.placeholder.slice(0, 80) : "",
+        aiOn: config.aiOn !== false,
+      },
+    };
+  };
+
   const sanitizeButtons = (pos: unknown, d: ButtonsPosition): ButtonsPosition => {
     const base = sanitizePos(pos, d);
     const p = (pos && typeof pos === "object" ? pos : {}) as Record<string, unknown>;
@@ -732,17 +1041,12 @@ function sanitizeLauncherLayout(raw: unknown): LauncherLayout {
     search: sanitizePos(r.search, DEFAULT_LAUNCHER_LAYOUT.search),
     buttons: sanitizeButtons(r.buttons, DEFAULT_LAUNCHER_LAYOUT.buttons),
     addButton: sanitizePos(r.addButton, DEFAULT_LAUNCHER_LAYOUT.addButton),
+    betterBar: sanitizeBetterBar(r.betterBar, DEFAULT_LAUNCHER_LAYOUT.betterBar),
   };
 }
 
-export function readSettings(): Settings {
-  let raw: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-    if (parsed && typeof parsed === "object") raw = parsed as Record<string, unknown>;
-  } catch {
-    // Corrupted storage — fall back to defaults.
-  }
+export function sanitizeSettings(value: unknown): Settings {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
     ...sanitize(raw, FLAT_SCHEMA, DEFAULT_FLAT),
     searchStyle: sanitize(raw.searchStyle, SEARCH_STYLE_SCHEMA, DEFAULT_SEARCH_STYLE),
@@ -750,44 +1054,94 @@ export function readSettings(): Settings {
     widgets: sanitizeWidgets(raw.widgets),
     homeLayout: sanitize(raw.homeLayout, HOME_LAYOUT_SCHEMA, DEFAULT_HOME_LAYOUT),
     launcherLayout: sanitizeLauncherLayout(raw.launcherLayout),
+    appMenu: sanitizeAppMenu(raw.appMenu),
+    faviconTheme: sanitizeFaviconTheme(raw.faviconTheme),
   };
+}
+
+export function readSettings(): Settings {
+  try {
+    return sanitizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"));
+  } catch {
+    // Corrupted storage — fall back to defaults.
+    return sanitizeSettings({});
+  }
+}
+
+export function sanitizeBookmarks(value: unknown): Bookmark[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, 500)
+    .filter(
+      (item): item is Bookmark =>
+        Boolean(item) && typeof item.id === "string" && typeof item.title === "string" && typeof item.url === "string",
+    )
+    .map((b) => ({ ...b, safe: safeWebUrl(b.url) }))
+    .filter((b) => b.safe)
+    .map((b) => ({
+      id: b.id.slice(0, 80),
+      title: b.title.slice(0, 120),
+      url: b.safe,
+      customIcon: typeof (b as Bookmark).customIcon === "string" && (b as Bookmark).customIcon ? (b as Bookmark).customIcon!.slice(0, 2_000_000) : undefined,
+      shape: typeof (b as Bookmark).shape === "string" && (BOOKMARK_SHAPES as readonly string[]).includes((b as Bookmark).shape!) ? (b as Bookmark).shape : undefined,
+    }));
 }
 
 export function readBookmarks(): Bookmark[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(BOOKMARKS_KEY) || "[]");
-    if (!Array.isArray(value)) return [];
-    return value
-      .filter(
-        (item): item is Bookmark =>
-          Boolean(item) && typeof item.id === "string" && typeof item.title === "string" && typeof item.url === "string",
-      )
-      .map((b) => ({
-        id: b.id,
-        title: b.title,
-        url: b.url,
-        customIcon: typeof (b as Bookmark).customIcon === "string" && (b as Bookmark).customIcon ? (b as Bookmark).customIcon : undefined,
-        shape: typeof (b as Bookmark).shape === "string" && (BOOKMARK_SHAPES as readonly string[]).includes((b as Bookmark).shape!) ? (b as Bookmark).shape : undefined,
-      }));
+    return sanitizeBookmarks(value);
   } catch {
     return [];
   }
 }
 
+export function sanitizeHistory(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 1000).map((item) => item.slice(0, 500)) : [];
+}
+
 export function readHistory(): string[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+    return sanitizeHistory(value);
   } catch {
     return [];
   }
 }
+
+export const STORAGE_EVENT = "lisyan:storage";
 
 export function persist(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // Storage can be unavailable (private mode, quota); the in-memory state still works.
+  }
+  // `storage` only fires in other tabs — tell widgets in this tab too.
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(STORAGE_EVENT, { detail: { key } }));
+}
+
+/**
+ * Turns what a person typed (or a backup file contains) into a safe web address, or "" if it can't be one.
+ * Only http(s) is allowed — `javascript:`, `data:`, `file:` and friends are rejected, so a stored link can never run code.
+ */
+export function safeWebUrl(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text || text.length > 2000 || /[\u0000-\u001f\u007f\s]/.test(text)) return "";
+  if (text.startsWith("/")) return "";
+  // "something:" is a scheme unless it is a host:port such as localhost:3000.
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) && !/^[^:/?#]+:\d+(?:[/?#]|$)/.test(text);
+  if (hasScheme && !/^https?:\/\//i.test(text)) return "";
+  try {
+    const url = new URL(hasScheme ? text : `https://${text}`);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    if (!url.hostname || url.username || url.password) return "";
+    const host = url.hostname;
+    const looksLikeHost = host === "localhost" || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith("[") || host.includes(".");
+    return looksLikeHost ? url.href : "";
+  } catch {
+    return "";
   }
 }
 

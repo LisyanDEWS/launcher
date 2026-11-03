@@ -1,8 +1,8 @@
 import { useState, useRef } from "react";
-import { Image as ImageIcon, Upload, X, Globe, Sparkles } from "lucide-react";
-import { normalizeUrl, type Bookmark, type BookmarkShape, BOOKMARK_SHAPES } from "../lib/settings";
+import { Image as Upload, X } from "lucide-react";
+import { safeWebUrl, type Bookmark, type BookmarkShape, BOOKMARK_SHAPES } from "../lib/settings";
 import { BookmarkIcon, getBookmarkShapeClass } from "./BookmarkIcon";
-import { BUTTON, BUTTON_PRIMARY, CARD, INPUT } from "./ui";
+import { BUTTON_PRIMARY, INPUT } from "./ui";
 import { useI18n } from "../lib/i18n";
 import { cn } from "../utils/cn";
 
@@ -19,6 +19,7 @@ export default function BookmarkDialog({ initialBookmark, defaultShape = "circle
 
   const [title, setTitle] = useState(initialBookmark?.title ?? "");
   const [url, setUrl] = useState(initialBookmark?.url ?? "");
+  const [urlError, setUrlError] = useState(false);
   const [customIcon, setCustomIcon] = useState<string | undefined>(initialBookmark?.customIcon);
   const [shape, setShape] = useState<BookmarkShape>(initialBookmark?.shape || defaultShape);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,10 +41,15 @@ export default function BookmarkDialog({ initialBookmark, defaultShape = "circle
     e.preventDefault();
     const cleanUrl = url.trim();
     if (!cleanUrl) return;
+    const safeUrl = safeWebUrl(cleanUrl);
+    if (!safeUrl) {
+      setUrlError(true);
+      return;
+    }
     const cleanTitle = title.trim() || cleanUrl.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split("/")[0];
     onSave({
       title: cleanTitle,
-      url: normalizeUrl(cleanUrl),
+      url: safeUrl,
       customIcon: customIcon?.trim() ? customIcon : undefined,
       shape,
     });
@@ -208,10 +214,19 @@ export default function BookmarkDialog({ initialBookmark, defaultShape = "circle
               autoFocus={!initialBookmark}
               dir="ltr"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                setUrlError(false);
+              }}
               placeholder="example.com"
-              className={cn(INPUT, "h-11")}
+              aria-invalid={urlError}
+              className={cn(INPUT, "h-11", urlError && "ring-2 ring-[var(--primary)]")}
             />
+            {urlError && (
+              <p role="alert" className="mt-1.5 px-1 text-xs font-medium text-[var(--primary)]">
+                {isRu ? "Введите корректный адрес сайта, например example.com" : "Enter a valid web address, e.g. example.com"}
+              </p>
+            )}
           </div>
         </div>
 

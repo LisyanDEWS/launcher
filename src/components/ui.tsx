@@ -14,9 +14,9 @@ export type Choice<T extends string> = {
   badge?: string;
 };
 
-export const CARD = "overflow-hidden rounded-[24px] bg-[var(--surface)]";
+export const CARD = "overflow-hidden rounded-[20px] bg-[var(--surface)]";
 export const INPUT =
-  "h-14 w-full rounded-2xl bg-[var(--surface-container-high)] px-5 text-[var(--fg)] outline-none transition focus:bg-[var(--surface-container-highest)] placeholder:text-[var(--muted)]";
+  "h-12 w-full rounded-2xl bg-[var(--surface-container-high)] px-4 text-[var(--fg)] outline-none transition focus:bg-[var(--surface-container-highest)] placeholder:text-[var(--muted)]";
 export const BUTTON =
   "inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-[var(--surface-container-high)] px-4 text-sm font-medium transition-all duration-300 hover:rounded-[14px] hover:bg-[var(--surface-container-highest)] disabled:cursor-not-allowed disabled:opacity-40";
 export const BUTTON_PRIMARY =
@@ -46,28 +46,28 @@ export function ChoiceList<T extends string>({
             disabled={disabled}
             onClick={() => onChange(optionValue)}
             className={cn(
-              "flex min-h-16 w-full items-center gap-4 px-4 py-3 text-start transition sm:px-5",
+              "flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-start transition",
               disabled ? "cursor-not-allowed opacity-50" : "hover:bg-[var(--surface-container-high)]",
             )}
           >
             {Icon && (
               <span
                 className={cn(
-                  "flex h-9 w-9 shrink-0 items-center justify-center transition-all duration-300",
+                  "flex h-8 w-8 shrink-0 items-center justify-center transition-all duration-300",
                   selected ? "rounded-[12px] bg-[var(--primary)] text-[var(--on-primary)]" : "rounded-full bg-[var(--surface-container-high)]",
                 )}
               >
-                <Icon size={18} strokeWidth={1.9} aria-hidden="true" />
+                <Icon size={16} strokeWidth={1.9} aria-hidden="true" />
               </span>
             )}
             <span className="min-w-0 flex-1">
-              <span className="flex flex-wrap items-center gap-2 font-medium">
+              <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
                 {optionLabel}
                 {badge && (
                   <span className="rounded-full bg-[var(--surface-container-highest)] px-2 py-0.5 text-[11px] font-medium text-[var(--muted)]">{badge}</span>
                 )}
               </span>
-              {description && <span className="mt-0.5 block text-sm leading-5 text-[var(--muted)]">{description}</span>}
+              {description && <span className="mt-0.5 block text-xs leading-4 text-[var(--muted)]">{description}</span>}
             </span>
             {preview && <span className="shrink-0">{preview}</span>}
             <span className="flex w-6 shrink-0 justify-center">{selected && <Check size={20} strokeWidth={2.2} aria-hidden="true" />}</span>
@@ -93,7 +93,7 @@ export function Segmented<T extends string>({
   disabled?: boolean;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className={cn("flex flex-wrap gap-1.5", disabled && "opacity-50")}>
+    <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className={cn("flex flex-wrap gap-1", disabled && "opacity-50")}>
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -105,7 +105,7 @@ export function Segmented<T extends string>({
             disabled={disabled}
             onClick={() => onChange(option.value)}
             className={cn(
-              "h-9 rounded-full px-3.5 text-sm transition-all duration-300 disabled:cursor-not-allowed",
+              "h-8 rounded-full px-3 text-xs transition-all duration-300 disabled:cursor-not-allowed",
               selected
                 ? "rounded-[12px] bg-[var(--primary)] font-medium text-[var(--on-primary)]"
                 : "bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)]",
@@ -121,10 +121,10 @@ export function Segmented<T extends string>({
 
 export function FieldRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <div className="px-5 py-4">
-      <div className="mb-2.5 text-sm font-medium">{label}</div>
+    <div className="px-4 py-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">{label}</div>
       {children}
-      {hint && <p className="mt-2 text-xs text-[var(--muted)]">{hint}</p>}
+      {hint && <p className="mt-1.5 text-[11px] leading-4 text-[var(--muted)]">{hint}</p>}
     </div>
   );
 }
@@ -150,8 +150,8 @@ export function SliderRow({
 }) {
   const id = useId();
   return (
-    <div className={cn("flex items-center gap-4 px-5 py-4 sm:gap-5", disabled && "opacity-50")}>
-      <label htmlFor={id} className="w-28 shrink-0 text-sm font-medium sm:w-40">
+    <div className={cn("flex items-center gap-3 px-4 py-2.5", disabled && "opacity-50")}>
+      <label htmlFor={id} className="w-24 shrink-0 truncate text-sm font-medium sm:w-32">
         {label}
       </label>
       <input
@@ -165,7 +165,7 @@ export function SliderRow({
         onChange={(event) => onChange(Number(event.target.value))}
         className="range min-w-0 flex-1"
       />
-      <span className="w-16 shrink-0 text-end text-sm tabular-nums text-[var(--muted)]">
+      <span className="w-14 shrink-0 text-end text-xs tabular-nums text-[var(--muted)]">
         {value}
         {unit}
       </span>
@@ -194,23 +194,23 @@ export function ToggleRow({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "flex w-full items-center justify-between gap-5 px-5 py-4 text-start transition",
+        "flex w-full items-center justify-between gap-4 px-4 py-3 text-start transition",
         disabled ? "cursor-not-allowed opacity-50" : "hover:bg-[var(--surface-container-high)]",
       )}
     >
       <span>
-        <span className="block font-medium">{title}</span>
-        {description && <span className="mt-1 block max-w-lg text-sm leading-5 text-[var(--muted)]">{description}</span>}
+        <span className="block text-sm font-medium">{title}</span>
+        {description && <span className="mt-0.5 block max-w-lg text-xs leading-4 text-[var(--muted)]">{description}</span>}
       </span>
       <span
         className={cn(
-          "relative h-7 w-12 shrink-0 rounded-full transition-colors",
+          "relative h-6 w-11 shrink-0 rounded-full transition-colors duration-300",
           checked ? "bg-[var(--primary)]" : "bg-[var(--surface-container-highest)]",
         )}
       >
         <span
           className={cn(
-            "absolute top-1 h-5 w-5 rounded-full transition-all duration-300",
+            "absolute top-1 h-4 w-4 rounded-full transition-all duration-300 ease-[var(--ui-spring)]",
             checked ? "start-6 bg-[var(--on-primary)]" : "start-1 bg-[var(--surface)]",
           )}
         />
@@ -232,10 +232,10 @@ export function SettingsGroup({
 }) {
   return (
     <section>
-      <div className="mb-3 flex items-end justify-between gap-4">
+      <div className="mb-2.5 flex items-end justify-between gap-4">
         <div>
           <h2 className="type-display text-lg font-semibold">{title}</h2>
-          {description && <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--muted)]">{description}</p>}
+          {description && <p className="mt-0.5 max-w-2xl text-sm leading-5 text-[var(--muted)]">{description}</p>}
         </div>
         {action}
       </div>
@@ -246,7 +246,7 @@ export function SettingsGroup({
 
 export function Notice({ icon: Icon = Info, children, action }: { icon?: LucideIcon; children: ReactNode; action?: ReactNode }) {
   return (
-    <div role="status" className="flex gap-3 rounded-[20px] bg-[var(--secondary-container)] px-4 py-3.5 text-sm leading-6 text-[var(--on-secondary-container)]">
+    <div role="status" className="flex gap-3 rounded-[18px] bg-[var(--secondary-container)] px-4 py-3 text-sm leading-5 text-[var(--on-secondary-container)]">
       <Icon size={18} className="mt-1 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         {children}
