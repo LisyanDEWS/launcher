@@ -16,4 +16,14 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  // Dev/preview only: listen on all interfaces and accept proxied preview hosts
+  // (sandbox / remote dev environments), so `npm run dev` works out of the box.
+  server: {
+    host: true,
+    allowedHosts: true,
+  },
+  preview: {
+    host: true,
+    allowedHosts: true,
+  },
 });
