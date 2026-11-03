@@ -4,7 +4,7 @@ import type { ClockFaceId, SecondsMode } from "./settings";
 export type FaceFlags = { seconds: boolean; date: boolean };
 
 export type FaceMeta = {
-  kind: "analog" | "digital";
+  kind: "analog" | "digital" | "calendar";
   /** Width ÷ height of the face. */
   ratio: (flags: FaceFlags) => number;
   /** Supports the seconds option. */
@@ -73,6 +73,15 @@ const digital = (ratio: FaceMeta["ratio"], extra: Partial<FaceMeta> = {}): FaceM
   ...extra,
 });
 
+const calendar = (ratio: FaceMeta["ratio"]): FaceMeta => ({
+  kind: "calendar",
+  ratio,
+  seconds: false,
+  sweep: false,
+  date: false,
+  format: false,
+});
+
 export const FACE_META: Record<ClockFaceId, FaceMeta> = {
   classic: analog({ date: true, defaults: { seconds: "sweep" } }),
   cookie: analog({ date: true }),
@@ -105,5 +114,28 @@ export const FACE_META: Record<ClockFaceId, FaceMeta> = {
   calendar: digital(() => 2.4),
   glance: digital(({ date }) => (date ? 3.5 : 1.9), { date: true, defaults: { date: true } }),
   progress: digital(() => 2.6, { date: true, defaults: { date: true } }),
+
+  // Material You 2025 set
+  m3_pill: digital(({ date }) => (date ? 1.75 : 2.2), { date: true, defaults: { date: true } }),
+  m3_tiles: digital(() => 0.92),
+  m3_ring: digital(() => 1, { seconds: true, date: true, defaults: { seconds: "tick", date: true } }),
+  m3_chip: digital(({ seconds }) => (seconds ? 3.2 : 2.6), { seconds: true }),
+  m3_scallop: analog({ date: true, defaults: { seconds: "sweep" } }),
+  m3_gem: analog({ date: true }),
+  m3_arc: analog({ sweep: false, format: true, date: true, defaults: { date: true } }),
+  m3_dot: analog({ defaults: { seconds: "tick" } }),
+
+  // Calendars
+  cal_month: calendar(() => 0.98),
+  cal_day: calendar(() => 1),
+  cal_week: calendar(() => 2.9),
+  cal_year: calendar(() => 2.4),
+
+  // Material You extras
+  m3_daybar: digital(() => 2.7, { date: true, defaults: { date: true } }),
+  m3_weekstrip: digital(() => 1.9, { defaults: { date: false } }),
+  m3_stacked: digital(() => 1.15),
+  m3_datering: calendar(() => 1),
+  m3_chips: digital(({ date }) => (date ? 2.3 : 3.1), { date: true }),
 };
 

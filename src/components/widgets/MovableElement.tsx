@@ -1,11 +1,12 @@
-import { RotateCcw, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { Eye, EyeOff, LocateFixed } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { ARROW_DIRECTIONS, DRAG_THRESHOLD, ElementToolbar, GuideLines, LONG_PRESS, NO_GUIDES, SelectionChrome, growsLeft, growsUp, guideLines, magnet, resizeDelta, type Direction, type Guides } from "./engine";
+import { useI18n } from "../../lib/i18n";
+import { collectPeers, stageScale, toStageRect } from "../../lib/stage";
 import { snapWithin, useViewport, type Rect } from "../../lib/widgets";
 import type { ElementPosition, HomeLayout } from "../../lib/settings";
 import { cn } from "../../utils/cn";
-
-type Direction = "move" | "nw" | "ne" | "se" | "sw" | "n" | "s" | "e" | "w";
 
 type Props = {
   id: string;
@@ -19,11 +20,25 @@ type Props = {
   onResize: (width: number, scale: number) => void;
   onResetCenter: () => void;
   onRemove?: () => void;
+  onShow?: () => void;
+  onEnterEdit?: () => void;
   onDragState?: (dragging: boolean) => void;
   className?: string;
   children: ReactNode;
 };
 
+type Draft = { left: number; top: number; width: number; scale: number };
+
+const SCALE_MIN = 50;
+const SCALE_MAX = 220;
+const WIDTH_MIN = 140;
+const WIDTH_MAX = 1400;
+const EDGE = 12;
+
+/**
+ * A system element (logo, search bar, bookmarks…) that behaves exactly like a widget while editing:
+ * same brackets, handles, snapping, keyboard nudging and long-press to edit.
+ */
 export default function MovableElement({
   id,
   title,
@@ -36,318 +51,287 @@ export default function MovableElement({
   onResize,
   onResetCenter,
   onRemove,
+  onShow,
+  onEnterEdit,
   onDragState,
   className = "",
   children,
 }: Props) {
+  const { t } = useI18n();
   const viewport = useViewport();
-  const [draft, setDraft] = useState<{ left: number; top: number; width: number; scale: number } | null>(null);
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    origLeft: number;
-    origTop: number;
-    origWidth: number;
-    origScale: number;
-    dir: Direction;
-  } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [guides, setGuides] = useState<Guides>(NO_GUIDES);
+  const [flowHeight, setFlowHeight] = useState(0);
+  const press = useRef<{ x: number; y: number; timer: number } | null>(null);
+  const grid = homeLayout.mode === "grid" || homeLayout.showGrid === "always";
 
-  // If not visible and not editing, hide completely
-  if (!position.visible && !editing) {
-    return null;
-  }
+  // Measure the in-flow height so the page doesn't collapse when the element lifts off during a drag.
+  useLayoutEffect(() => {
+    if (!box.current) return;
+    const el = box.current;
+    const update = () => setFlowHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [position.scale, position.width, editing]);
+
+  if (!position.visible && !editing) return null;
 
   const isCustom = position.custom;
-  const rawWidth = draft ? draft.width : position.width;
-  const currentScale = draft ? draft.scale : position.scale;
-  const currentWidth = Math.min(rawWidth, Math.max(240, viewport.w - 24));
+  const scale = draft ? draft.scale : position.scale;
+  const width = Math.min(draft ? draft.width : position.width, Math.max(200, viewport.w - EDGE * 2));
+  const visualHeight = flowHeight || 56;
 
-  // Compute absolute left & top if custom, else centered defaults
-  const spanX = Math.max(0, viewport.w - currentWidth);
-  const spanY = Math.max(0, viewport.h - 180);
+  // Resolved position for custom placement.
+  const spanX = Math.max(0, viewport.w - width);
+  const spanY = Math.max(0, viewport.h - visualHeight);
   let left = position.x * spanX;
   let top = position.y * spanY;
-
-  if (homeLayout.mode === "grid" && isCustom) {
+  if (grid && isCustom) {
     left = snapWithin(left, homeLayout.cell, spanX);
     top = snapWithin(top, homeLayout.cell, spanY);
   }
+  const finalLeft = draft ? draft.left : Math.min(left, Math.max(EDGE, viewport.w - width - EDGE));
+  const finalTop = draft ? draft.top : Math.max(EDGE, top);
 
-  const finalLeft = draft ? draft.left : Math.min(left, Math.max(12, viewport.w - currentWidth - 12));
-  const finalTop = draft ? draft.top : top;
+  const cancelPress = () => {
+    if (!press.current) return;
+    window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
 
-  const startDrag = (e: ReactPointerEvent<HTMLElement>, dir: Direction) => {
-    if (!editing || e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
+  const place = (origin: Rect, nextLeft: number, nextTop: number, peers: Rect[]) => {
+    const maxX = Math.max(0, viewport.w - origin.width);
+    const maxY = Math.max(0, viewport.h - origin.height);
+    const x = Math.min(Math.max(0, nextLeft), maxX);
+    const y = Math.min(Math.max(0, nextTop), maxY);
+    if (grid) return { left: snapWithin(x, homeLayout.cell, maxX), top: snapWithin(y, homeLayout.cell, maxY), guides: NO_GUIDES };
+    if (!homeLayout.guides) return { left: x, top: y, guides: NO_GUIDES };
+    const lines = guideLines(viewport, peers);
+    const sx = magnet(x, origin.width, lines.x, maxX);
+    const sy = magnet(y, origin.height, lines.y, maxY);
+    return { left: sx.value, top: sy.value, guides: { x: sx.guide === null ? [] : [sx.guide], y: sy.guide === null ? [] : [sy.guide] } };
+  };
+
+  const commit = (latest: Draft, dir: Direction) => {
+    const newSpanX = Math.max(1, viewport.w - latest.width);
+    const newSpanY = Math.max(1, viewport.h - visualHeight);
+    onMove(Math.min(1, Math.max(0, latest.left / newSpanX)), Math.min(1, Math.max(0, latest.top / newSpanY)));
+    if (dir !== "move") onResize(Math.round(latest.width), Math.round(latest.scale));
+  };
+
+  /** Where the element really is, in the same (unzoomed) coordinates it is positioned in. */
+  const measure = (): Rect => {
+    const r = box.current?.getBoundingClientRect();
+    return r ? toStageRect(r) : { left: finalLeft, top: finalTop, width, height: visualHeight };
+  };
+
+  const startGesture = (event: ReactPointerEvent<HTMLElement>, dir: Direction) => {
+    if (!editing) {
+      // Press-and-hold enters edit mode, just like widgets — but never when pressing the input or a link/button.
+      if (!onEnterEdit || (event.pointerType === "mouse" && event.button !== 0)) return;
+      if ((event.target as HTMLElement).closest("input, textarea, select, button, a, [contenteditable]")) return;
+      cancelPress();
+      press.current = {
+        x: event.clientX,
+        y: event.clientY,
+        timer: window.setTimeout(() => {
+          press.current = null;
+          onEnterEdit();
+          onSelect();
+        }, LONG_PRESS),
+      };
+      return;
+    }
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
     onSelect();
+    box.current?.focus({ preventScroll: true });
 
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const origLeft = finalLeft;
-    const origTop = finalTop;
-    const origWidth = currentWidth;
-    const origScale = currentScale;
-
-    dragRef.current = { startX, startY, origLeft, origTop, origWidth, origScale, dir };
+    // Always start from where the element really is on screen — no jump on the first drag.
+    const origin = measure();
+    const peers = collectPeers(id);
+    const zoom = stageScale(); // the screen is smaller than its layout while editing
+    const origScale = scale;
+    const origWidth = width;
+    const { clientX: startX, clientY: startY, pointerId } = event;
     let moved = false;
+    let latest: Draft | null = null;
 
-    const handlePointerMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      if (!moved && Math.hypot(dx, dy) < 3) return;
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      const dx = (e.clientX - startX) / zoom;
+      const dy = (e.clientY - startY) / zoom;
+      if (!moved && Math.hypot(dx * zoom, dy * zoom) < DRAG_THRESHOLD) return;
       if (!moved) {
         moved = true;
         onDragState?.(true);
       }
 
       if (dir === "move") {
-        let nextLeft = origLeft + dx;
-        let nextTop = origTop + dy;
-        nextLeft = Math.max(12, Math.min(viewport.w - origWidth - 12, nextLeft));
-        nextTop = Math.max(12, Math.min(viewport.h - 100, nextTop));
-        if (homeLayout.mode === "grid") {
-          nextLeft = snapWithin(nextLeft, homeLayout.cell, viewport.w - origWidth);
-          nextTop = snapWithin(nextTop, homeLayout.cell, viewport.h - 100);
-        }
-        setDraft({ left: nextLeft, top: nextTop, width: origWidth, scale: origScale });
+        const placed = place(origin, origin.left + dx, origin.top + dy, peers);
+        latest = { left: placed.left, top: placed.top, width: origWidth, scale: origScale };
+        setGuides(placed.guides);
+      } else if (dir === "e" || dir === "w") {
+        // Side pills change the width (great for the search bar); everything else scales proportionally.
+        const delta = resizeDelta(dir, dx, dy, origin.width, origin.height);
+        const nextWidth = Math.round(Math.max(WIDTH_MIN, Math.min(WIDTH_MAX, viewport.w - EDGE * 2, origWidth + delta)));
+        const dw = nextWidth - origWidth;
+        const nextLeft = dir === "w" ? origin.left - dw : origin.left;
+        latest = { left: Math.max(0, Math.min(viewport.w - nextWidth, nextLeft)), top: origin.top, width: nextWidth, scale: origScale };
       } else {
-        // Multi-directional resizing in every direction (N, S, E, W, NW, NE, SW, SE)
-        let nextWidth = origWidth;
-        let nextScale = origScale;
-        let nextLeft = origLeft;
-        let nextTop = origTop;
-
-        // Horizontal changes
-        if (dir === "e" || dir === "se" || dir === "ne") {
-          nextWidth = Math.max(140, Math.min(1400, origWidth + dx));
-          const scaleDelta = Math.round((dx / origWidth) * 45);
-          nextScale = Math.max(50, Math.min(220, origScale + scaleDelta));
-        } else if (dir === "w" || dir === "sw" || dir === "nw") {
-          const proposedWidth = Math.max(140, Math.min(1400, origWidth - dx));
-          const actualDx = origWidth - proposedWidth;
-          nextWidth = proposedWidth;
-          nextLeft = Math.max(12, origLeft + actualDx);
-          const scaleDelta = Math.round((-dx / origWidth) * 45);
-          nextScale = Math.max(50, Math.min(220, origScale + scaleDelta));
-        }
-
-        // Vertical changes (adjust scale and vertical position)
-        if (dir === "s" || dir === "se" || dir === "sw") {
-          const scaleDeltaY = Math.round((dy / 120) * 35);
-          nextScale = Math.max(50, Math.min(220, nextScale + scaleDeltaY));
-        } else if (dir === "n" || dir === "ne" || dir === "nw") {
-          const scaleDeltaY = Math.round((-dy / 120) * 35);
-          nextScale = Math.max(50, Math.min(220, nextScale + scaleDeltaY));
-          nextTop = Math.max(12, origTop + dy);
-        }
-
-        setDraft({
-          left: Math.max(12, Math.min(viewport.w - nextWidth - 12, nextLeft)),
-          top: Math.max(12, Math.min(viewport.h - 80, nextTop)),
-          width: nextWidth,
+        const delta = resizeDelta(dir, dx, dy, origin.width, origin.height);
+        const diagonal = Math.hypot(origin.width, origin.height) || 1;
+        let nextScale = (origScale * (diagonal + delta)) / diagonal;
+        nextScale = Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, nextScale)) / 2) * 2;
+        const factor = nextScale / origScale;
+        const dw = origin.width * factor - origin.width;
+        const dh = origin.height * factor - origin.height;
+        const nextLeft = growsLeft(dir) ? origin.left - dw : origin.left;
+        const nextTop = growsUp(dir) ? origin.top - dh : origin.top;
+        latest = {
+          left: Math.max(0, Math.min(viewport.w - origin.width, nextLeft)),
+          top: Math.max(0, Math.min(viewport.h - origin.height, nextTop)),
+          width: origWidth,
           scale: nextScale,
-        });
+        };
       }
+      setDraft(latest);
     };
 
-    const handlePointerUp = () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-
-      if (moved && dragRef.current) {
-        onDragState?.(false);
-        setDraft((latest) => {
-          if (latest) {
-            const newSpanX = Math.max(1, viewport.w - latest.width);
-            const newSpanY = Math.max(1, viewport.h - 180);
-            const newX = Math.min(1, Math.max(0, latest.left / newSpanX));
-            const newY = Math.min(1, Math.max(0, latest.top / newSpanY));
-            onMove(newX, newY);
-            if (dir !== "move") {
-              onResize(latest.width, latest.scale);
-            }
-          }
-          return null;
-        });
-      } else {
-        setDraft(null);
-      }
-      dragRef.current = null;
+    const end = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      setDraft(null);
+      setGuides(NO_GUIDES);
+      if (!moved) return;
+      onDragState?.(false);
+      if (latest) commit(latest, dir);
     };
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   };
 
-  // If in normal mode and not custom, render inline in standard flow
+  const onKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!editing || event.target !== event.currentTarget) return;
+    if ((event.key === "Delete" || event.key === "Backspace") && onRemove) {
+      event.preventDefault();
+      onRemove();
+      return;
+    }
+    const direction = ARROW_DIRECTIONS[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    const origin = measure();
+    const step = grid ? homeLayout.cell * (event.shiftKey ? 4 : 1) : event.shiftKey ? 10 : 1;
+    const placed = place(origin, origin.left + direction[0] * step, origin.top + direction[1] * step, collectPeers(id));
+    commit({ left: placed.left, top: placed.top, width, scale }, "move");
+  };
+
+  const lifted = isCustom || draft !== null;
+  const hidden = !position.visible && editing;
+
+  const scaled = (
+    <div
+      className={cn("w-full", editing && "pointer-events-none")}
+      style={{ transform: scale !== 100 ? `scale(${scale / 100})` : undefined, transformOrigin: "center top" }}
+    >
+      {children}
+    </div>
+  );
+
+  // Normal mode, default placement: plain centred flow.
   if (!editing && !isCustom) {
     return (
       <div
         data-widget-id={id}
-        className={cn("relative w-full mx-auto flex justify-center transition-all duration-300 max-w-[calc(100vw-24px)] px-2", className)}
-        style={{
-          maxWidth: position.width,
-          marginBottom: position.scale > 100 ? `${Math.round(((position.scale - 100) / 100) * 44)}px` : undefined,
+        ref={box}
+        onPointerDown={(e) => startGesture(e, "move")}
+        onPointerMove={(e) => {
+          if (press.current && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > 8) cancelPress();
         }}
+        onPointerUp={cancelPress}
+        onPointerLeave={cancelPress}
+        onPointerCancel={cancelPress}
+        className={cn("relative mx-auto flex w-full justify-center", className)}
+        style={{ maxWidth: width, marginBottom: scale > 100 ? `${Math.round(((scale - 100) / 100) * visualHeight)}px` : undefined }}
       >
-        <div
-          className="w-full flex justify-center"
-          style={{
-            transform: position.scale !== 100 ? `scale(${position.scale / 100})` : undefined,
-            transformOrigin: "center top",
-          }}
-        >
-          {children}
-        </div>
+        {scaled}
       </div>
     );
   }
 
-  // Absolute custom positioning or edit mode
-  const stylePos: React.CSSProperties = isCustom
-    ? {
-        position: "fixed",
-        left: `${finalLeft}px`,
-        top: `${finalTop}px`,
-        width: `${currentWidth}px`,
-        maxWidth: "calc(100vw - 24px)",
-        zIndex: editing ? (selected ? 35 : 25) : 20,
-      }
-    : {
-        position: "relative",
-        margin: "0 auto",
-        width: `${currentWidth}px`,
-        maxWidth: "calc(100vw - 24px)",
-        zIndex: editing ? (selected ? 35 : 25) : "auto",
-      };
+  const style: CSSProperties = lifted
+    ? { position: "fixed", left: finalLeft, top: finalTop, width, maxWidth: `calc(100vw - ${EDGE * 2}px)`, zIndex: editing ? (selected ? 48 : 46) : 20 }
+    : { position: "relative", marginTop: 0, marginRight: "auto", marginBottom: 0, marginLeft: "auto", width, maxWidth: `calc(100vw - ${EDGE * 2}px)`, zIndex: editing ? (selected ? 48 : 46) : "auto" };
+
+  const toolbarBelow = (lifted ? finalTop : box.current ? toStageRect(box.current.getBoundingClientRect()).top : 100) < 72;
 
   return (
-    <div
-      data-widget-id={id}
-      style={stylePos}
-      onPointerDown={(e) => {
-        if (editing) {
-          e.stopPropagation();
-          startDrag(e, "move");
-        }
-      }}
-      className={cn(
-        "transition-[outline-color] select-none mx-auto relative group/movable",
-        editing && "cursor-grab active:cursor-grabbing",
-        editing && selected && "ring-2 ring-[var(--primary)] ring-offset-4 ring-offset-[var(--bg)] rounded-3xl",
-        editing && !selected && "hover:outline hover:outline-1 hover:outline-dashed hover:outline-[var(--fg)]/40 rounded-3xl",
-        !position.visible && editing && "opacity-40 grayscale",
-        className
-      )}
-    >
-      {/* Floating Toolbar when selected in edit mode */}
-      {editing && selected && (
-        <div
-          className="absolute -top-12 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-[var(--surface)] px-3 py-1 shadow-xl ring-1 ring-[var(--line)] z-50 pointer-events-auto"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <span className="text-xs font-semibold px-1 text-[var(--muted)]">{title}</span>
-          {isCustom && (
-            <button
-              type="button"
-              onClick={onResetCenter}
-              title="Reset to center / По центру"
-              className="flex items-center gap-1 rounded-full bg-[var(--surface-container-high)] px-2.5 py-1 text-xs hover:bg-[var(--surface-container-highest)] transition"
-            >
-              <RotateCcw size={12} />
-              <span>Center</span>
-            </button>
-          )}
-          {onRemove && (
-            <button
-              type="button"
-              onClick={onRemove}
-              title="Remove / Скрыть"
-              className="flex items-center gap-1 rounded-full bg-red-500/15 text-red-400 px-2.5 py-1 text-xs hover:bg-red-500/25 transition"
-            >
-              <Trash2 size={12} />
-              <span>Remove</span>
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Main children with scaling */}
+    <>
+      {/* Placeholder keeps the column from collapsing while a default-placed element is being dragged. */}
+      {!isCustom && draft && <div aria-hidden="true" style={{ height: flowHeight, marginBottom: scale > 100 ? `${Math.round(((scale - 100) / 100) * visualHeight)}px` : undefined }} />}
       <div
-        className={cn(editing && "pointer-events-none")}
-        style={{
-          transform: currentScale !== 100 ? `scale(${currentScale / 100})` : undefined,
-          transformOrigin: "center center",
+        ref={box}
+        data-widget-id={id}
+        tabIndex={editing ? 0 : -1}
+        role={editing ? "button" : undefined}
+        aria-label={title}
+        style={style}
+        onPointerDown={(e) => startGesture(e, "move")}
+        onPointerMove={(e) => {
+          if (press.current && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > 8) cancelPress();
         }}
+        onPointerUp={cancelPress}
+        onPointerLeave={cancelPress}
+        onPointerCancel={cancelPress}
+        onKeyDown={onKey}
+        onFocus={editing ? (event) => event.target === event.currentTarget && onSelect() : undefined}
+        className={cn(
+          "wl-item wl-item--system group/movable select-none",
+          !lifted && "mx-auto",
+          editing && "wl-item--editing",
+          selected && "is-selected",
+          draft && "is-dragging",
+          hidden && "is-hidden",
+          className,
+        )}
       >
-        {children}
+        {editing && selected && !draft && (
+          <ElementToolbar below={toolbarBelow} title={title}>
+            {isCustom && (
+              <button type="button" onClick={onResetCenter} title={t("home.element.center")} aria-label={t("home.element.center")}>
+                <LocateFixed size={16} aria-hidden="true" />
+              </button>
+            )}
+            {hidden && onShow ? (
+              <button type="button" onClick={onShow} title={t("home.element.show")} aria-label={t("home.element.show")}>
+                <Eye size={16} aria-hidden="true" />
+              </button>
+            ) : (
+              onRemove && (
+                <button type="button" onClick={onRemove} title={t("home.element.hide")} aria-label={t("home.element.hide")}>
+                  <EyeOff size={16} aria-hidden="true" />
+                </button>
+              )
+            )}
+          </ElementToolbar>
+        )}
+
+        <div style={{ transform: scale !== 100 ? `scale(${scale / 100})` : undefined, transformOrigin: "center top" }} className={cn("w-full", editing && "pointer-events-none")}>
+          {children}
+        </div>
+
+        {editing && selected && <SelectionChrome onHandle={startGesture} hint={hidden ? t("home.element.hiddenHint") : undefined} />}
       </div>
-
-      {/* Modern Lockscreen/Homescreen Customization Frame (Corner Brackets & 8-Directional Handles) */}
-      {editing && selected && (
-        <>
-          {/* L-shaped corner visual brackets */}
-          <div className="pointer-events-none absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-[var(--primary)] rounded-tl-lg" />
-          <div className="pointer-events-none absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-[var(--primary)] rounded-tr-lg" />
-          <div className="pointer-events-none absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-[var(--primary)] rounded-bl-lg" />
-          <div className="pointer-events-none absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-[var(--primary)] rounded-br-lg" />
-
-          {/* 4 Corner Drag Handles */}
-          <span
-            className="absolute -top-2.5 -left-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nwse-resize pointer-events-auto transition hover:scale-125 z-40"
-            onPointerDown={(e) => startDrag(e, "nw")}
-            title="Expand / Shrink NW"
-            aria-hidden="true"
-          />
-          <span
-            className="absolute -top-2.5 -right-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nesw-resize pointer-events-auto transition hover:scale-125 z-40"
-            onPointerDown={(e) => startDrag(e, "ne")}
-            title="Expand / Shrink NE"
-            aria-hidden="true"
-          />
-          <span
-            className="absolute -bottom-2.5 -right-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nwse-resize pointer-events-auto transition hover:scale-125 z-40"
-            onPointerDown={(e) => startDrag(e, "se")}
-            title="Expand / Shrink SE"
-            aria-hidden="true"
-          />
-          <span
-            className="absolute -bottom-2.5 -left-2.5 h-5 w-5 rounded-full border-2 border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-nesw-resize pointer-events-auto transition hover:scale-125 z-40"
-            onPointerDown={(e) => startDrag(e, "sw")}
-            title="Expand / Shrink SW"
-            aria-hidden="true"
-          />
-
-          {/* 4 Edge Drag Pill Handles */}
-          <span
-            className="absolute -top-2 left-1/2 -translate-x-1/2 h-3.5 w-8 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ns-resize pointer-events-auto transition hover:scale-110 z-40"
-            onPointerDown={(e) => startDrag(e, "n")}
-            title="Expand / Shrink Top"
-            aria-hidden="true"
-          />
-          <span
-            className="absolute -bottom-2 left-1/2 -translate-x-1/2 h-3.5 w-8 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ns-resize pointer-events-auto transition hover:scale-110 z-40"
-            onPointerDown={(e) => startDrag(e, "s")}
-            title="Expand / Shrink Bottom"
-            aria-hidden="true"
-          />
-          <span
-            className="absolute top-1/2 -left-2 -translate-y-1/2 h-8 w-3.5 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ew-resize pointer-events-auto transition hover:scale-110 z-40"
-            onPointerDown={(e) => startDrag(e, "w")}
-            title="Expand / Shrink Left"
-            aria-hidden="true"
-          />
-          <span
-            className="absolute top-1/2 -right-2 -translate-y-1/2 h-8 w-3.5 rounded-full border border-[var(--surface)] bg-[var(--primary)] shadow-md cursor-ew-resize pointer-events-auto transition hover:scale-110 z-40"
-            onPointerDown={(e) => startDrag(e, "e")}
-            title="Expand / Shrink Right"
-            aria-hidden="true"
-          />
-        </>
-      )}
-    </div>
+      {editing && <GuideLines guides={guides} />}
+    </>
   );
 }

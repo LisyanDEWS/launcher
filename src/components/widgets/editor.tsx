@@ -1,67 +1,31 @@
-import { ChevronDown, Cloud, Code2, Copy, Folder, Maximize2, Move, RotateCcw, Search, Sparkles, Trash2, Watch, X } from "lucide-react";
-import { useMemo, useState } from "react";
-import Clock from "./Clock";
+import { ChevronDown, Code2, Copy, EyeOff, LayoutGrid, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { FaceGallery } from "./FaceGallery";
+import { FaceThumb } from "./FaceThumb";
+
+export { FaceGallery, FaceThumb };
 import { BUTTON, BUTTON_PRIMARY, CARD, FieldRow, INPUT, Segmented, SliderRow, ToggleRow } from "../ui";
 import { cityName, timeZoneOptions } from "../../lib/clock";
 import { FACE_META } from "../../lib/faces";
 import { useI18n } from "../../lib/i18n";
 import {
-  CLOCK_FACES,
-  WEATHER_FACES,
   BOOKMARK_LAYOUTS,
-  DEFAULT_WIDGET,
-  DEFAULT_WEATHER_WIDGET,
-  DEFAULT_BOOKMARKS_WIDGET,
+  BOOKMARK_LAYOUT_LABELS,
   HOME_LAYOUT_SCHEMA,
   HOUR_CYCLES,
   WIDGET_COLORS,
   limits,
-  type ClockFaceId,
-  type WeatherFaceId,
-  type CustomHtmlWidget,
-  type BookmarksWidget,
+  type BarSlot,
+  type BarSlotKind,
   type BookmarksLayout,
   type HomeWidget,
   type HomeLayout,
   type LauncherLayout,
   type SecondsMode,
-  type ElementPosition,
-  type ButtonsPosition,
   type SearchStyle,
 } from "../../lib/settings";
-import { SIZE_MAX, SIZE_MIN, captionText, faceFlags, widgetSize } from "../../lib/widgets";
+import { SIZE_MAX, SIZE_MIN, captionText } from "../../lib/widgets";
 import { cn } from "../../utils/cn";
-
-/** A live widget scaled to fit a box (galleries, lists) with zero cropping. */
-export function FaceThumb({ widget, maxWidth, maxHeight }: { widget: HomeWidget; maxWidth: number; maxHeight: number }) {
-  const size = widgetSize(widget);
-  const ratio = Math.max(0.4, size.width / Math.max(1, size.faceHeight));
-  const baseWidth = 260;
-  const baseHeight = Math.max(100, Math.round(baseWidth / ratio));
-  const scale = Math.min(maxWidth / baseWidth, maxHeight / baseHeight);
-  const displayWidth = Math.round(baseWidth * scale);
-  const displayHeight = Math.round(baseHeight * scale);
-
-  return (
-    <div
-      className="relative flex items-center justify-center select-none overflow-visible"
-      style={{ width: `${displayWidth}px`, height: `${displayHeight}px` }}
-    >
-      <div
-        style={{
-          width: `${baseWidth}px`,
-          height: `${baseHeight}px`,
-          transform: `scale(${scale})`,
-          transformOrigin: "center center",
-          pointerEvents: "none",
-        }}
-        className="flex items-center justify-center shrink-0"
-      >
-        <Clock widget={widget} width={baseWidth} faceHeight={baseHeight} />
-      </div>
-    </div>
-  );
-}
 
 const CITY_PRESETS = [
   "Moscow",
@@ -74,455 +38,6 @@ const CITY_PRESETS = [
   "Singapore",
   "Sydney",
 ];
-
-/** All clock and 4 adaptive weather faces, bookmarks folder widget, and live previews. */
-export function FaceGallery({
-  value,
-  base,
-  onPickClock,
-  onPickWeather,
-  onPickBookmarks,
-  onOpenHtmlStudio,
-}: {
-  value?: string;
-  base?: Partial<HomeWidget>;
-  onPickClock: (face: ClockFaceId) => void;
-  onPickWeather: (face: WeatherFaceId) => void;
-  onPickBookmarks?: (layout: BookmarksLayout) => void;
-  onOpenHtmlStudio?: () => void;
-}) {
-  const { t, lang } = useI18n();
-  const isRu = lang === "ru";
-  const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"all" | "weather" | "bookmarks" | "clocks">(() =>
-    value && !value.startsWith("w") && !value.startsWith("weather_") ? "clocks" : "all"
-  );
-  const [previewCity, setPreviewCity] = useState("Moscow");
-  const [selectedBookmarkLayout, setSelectedBookmarkLayout] = useState<BookmarksLayout>("2x2");
-  const [previewModalWidget, setPreviewModalWidget] = useState<HomeWidget | null>(null);
-
-  const weatherGroups = useMemo(
-    () => [
-      {
-        id: "weather",
-        title: isRu ? "Погода" : "Weather",
-        desc: isRu ? "Адаптивные виджеты: текущие условия, облачность, влажность и осадки" : "Adaptive widgets: conditions, clouds, humidity and rain",
-        faces: [
-          "w01_sunny",
-          "w02_partly_cloudy",
-          "w12_humidity_ring",
-          "w15_rain_chance",
-        ] as WeatherFaceId[],
-      },
-    ],
-    [isRu]
-  );
-
-  const clockGroups = useMemo(
-    () => [
-      {
-        id: "digital",
-        title: t("wg.digital"),
-        desc: isRu ? "Цифровые, перекидные, сегментные и бинарные часы" : "Flip, segmented, matrix, binary, and digital cards",
-        faces: CLOCK_FACES.filter((f) => FACE_META[f]?.kind === "digital"),
-      },
-      {
-        id: "analog",
-        title: t("wg.analog"),
-        desc: isRu ? "Стрелочные циферблаты в стилях Material You" : "Analog dials in Material 3 shapes",
-        faces: CLOCK_FACES.filter((f) => FACE_META[f]?.kind === "analog"),
-      },
-    ],
-    [isRu, t]
-  );
-
-  const query = search.trim().toLowerCase();
-
-  // Filter items by search
-  const filteredWeatherGroups = useMemo(() => {
-    if (activeTab === "clocks" || activeTab === "bookmarks") return [];
-    return weatherGroups
-      .map((g) => ({
-        ...g,
-        faces: g.faces.filter((face) => {
-          if (!query) return true;
-          const label = t(`wf.f.${face}`).toLowerCase();
-          return label.includes(query) || face.toLowerCase().includes(query);
-        }),
-      }))
-      .filter((g) => g.faces.length > 0);
-  }, [weatherGroups, activeTab, query, t]);
-
-  const filteredClockGroups = useMemo(() => {
-    if (activeTab === "weather" || activeTab === "bookmarks") return [];
-    return clockGroups
-      .map((g) => ({
-        ...g,
-        faces: g.faces.filter((face) => {
-          if (!query) return true;
-          const label = t(`wf.f.${face}`).toLowerCase();
-          return label.includes(query) || face.toLowerCase().includes(query);
-        }),
-      }))
-      .filter((g) => g.faces.length > 0);
-  }, [clockGroups, activeTab, query, t]);
-
-  const showBookmarksCard = (activeTab === "all" || activeTab === "bookmarks") && (!query || "bookmarks".includes(query) || "закладки".includes(query) || "папка".includes(query));
-
-  return (
-    <div className="space-y-3.5">
-      {/* Search Bar for Widgets */}
-      <div className="relative">
-        <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" aria-hidden="true" />
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={isRu ? "Поиск виджетов..." : "Search widgets..."}
-          className="h-9 w-full rounded-xl bg-[var(--surface-container-high)] pl-9 pr-8 text-xs font-medium text-[var(--fg)] placeholder:text-[var(--muted)] outline-none ring-1 ring-[var(--line)] focus:ring-2 focus:ring-[var(--primary)] transition"
-        />
-        {search && (
-          <button
-            type="button"
-            onClick={() => setSearch("")}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-[var(--muted)] hover:text-[var(--fg)] transition"
-            aria-label="Clear"
-          >
-            <X size={13} />
-          </button>
-        )}
-      </div>
-
-      {/* Category Pills (Clean Minimalist, Zero Emojis) */}
-      <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-none">
-        {[
-          { id: "all", label: isRu ? "Все" : "All" },
-          { id: "bookmarks", label: isRu ? "Закладки" : "Bookmarks" },
-          { id: "weather", label: isRu ? "Погода" : "Weather" },
-          { id: "clocks", label: isRu ? "Часы" : "Clocks" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id as any)}
-            className={cn(
-              "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all duration-200",
-              activeTab === tab.id
-                ? "bg-[var(--primary)] text-[var(--on-primary)] shadow-xs font-semibold"
-                : "bg-[var(--surface-container-high)] text-[var(--muted)] hover:bg-[var(--surface-container-highest)] hover:text-[var(--fg)]"
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Bookmarks Folder Widget Picker Card */}
-      {showBookmarksCard && (
-        <div className="relative overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface-container-high)] p-3 shadow-xs">
-          <div className="flex items-center justify-between pb-2">
-            <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--primary)] text-[var(--on-primary)] shadow-xs">
-                <Folder size={14} />
-              </div>
-              <div>
-                <h4 className="text-xs font-semibold text-[var(--fg)]">
-                  {isRu ? "Папка закладок" : "Bookmarks Folder"}
-                </h4>
-                <p className="text-[10px] text-[var(--muted)]">
-                  {isRu ? "Сетка сайтов (1x1, 2x1, 2x2, 4x1, 4x2)" : "Bento bookmarks folder"}
-                </p>
-              </div>
-            </div>
-            {onPickBookmarks && (
-              <button
-                type="button"
-                onClick={() => onPickBookmarks(selectedBookmarkLayout)}
-                className="shrink-0 rounded-full bg-[var(--primary)] px-3 py-1 text-xs font-semibold text-[var(--on-primary)] transition hover:opacity-90 active:scale-95 shadow-xs"
-              >
-                {isRu ? "+ Добавить" : "+ Add"}
-              </button>
-            )}
-          </div>
-
-          {/* Layout Selector */}
-          <div className="flex items-center gap-1 pt-1.5 border-t border-[var(--line)] text-[11px]">
-            <span className="shrink-0 text-[10px] font-medium text-[var(--muted)] mr-1">{isRu ? "Сетка:" : "Grid:"}</span>
-            {BOOKMARK_LAYOUTS.map((layout) => (
-              <button
-                key={layout}
-                type="button"
-                onClick={() => setSelectedBookmarkLayout(layout)}
-                className={cn(
-                  "flex-1 rounded-md py-0.5 text-center text-[10px] font-medium transition",
-                  selectedBookmarkLayout === layout
-                    ? "bg-[var(--primary)] text-[var(--on-primary)] font-semibold shadow-xs"
-                    : "bg-[var(--surface-container-highest)] hover:bg-[var(--line)] text-[var(--muted)]"
-                )}
-              >
-                {layout}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* HTML Widget Studio Hero Card */}
-      {onOpenHtmlStudio && (
-        <div className="relative overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface-container-high)] p-3 shadow-xs">
-          <div className="flex items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-container-highest)] text-[var(--fg)] shadow-xs">
-                <Code2 size={15} />
-              </div>
-              <div>
-                <h4 className="text-xs font-semibold text-[var(--fg)]">
-                  {isRu ? "Свой HTML виджет" : "Custom HTML Widget"}
-                </h4>
-                <p className="text-[10px] text-[var(--muted)]">
-                  {isRu ? "Редактор кода и превью" : "HTML workspace & preview"}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenHtmlStudio}
-              className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--primary)] px-3 py-1 text-xs font-semibold text-[var(--on-primary)] shadow-xs hover:opacity-90 active:scale-95 transition"
-            >
-              <Sparkles size={12} />
-              {isRu ? "Создать" : "Create"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Quick City Presets for Weather Preview */}
-      {(activeTab !== "clocks" || filteredWeatherGroups.length > 0) && (
-        <div className="flex items-center gap-1 overflow-x-auto pb-0.5 text-[11px] text-[var(--muted)] scrollbar-none">
-          <span className="shrink-0 text-[10px] font-medium mr-1">{isRu ? "Город:" : "City:"}</span>
-          {CITY_PRESETS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setPreviewCity(c)}
-              className={cn(
-                "shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition",
-                previewCity === c
-                  ? "bg-[var(--fg)] text-[var(--bg)] font-semibold"
-                  : "bg-[var(--surface-container-high)] hover:bg-[var(--line)]"
-              )}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Weather Groups */}
-      {filteredWeatherGroups.map((group) => (
-        <section key={group.id} className="space-y-2 pt-1">
-          <div className="px-0.5">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--fg)]">{group.title}</h3>
-            <p className="text-[10px] text-[var(--muted)]">{group.desc}</p>
-          </div>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            {group.faces.map((face) => {
-              const preview: HomeWidget = {
-                ...DEFAULT_WEATHER_WIDGET,
-                id: `preview-weather-${face}`,
-                face,
-                city: previewCity,
-                type: "weather",
-                color: base?.color ?? "primary",
-                label: "",
-                opacity: 100,
-              };
-              const selected = value === face;
-              return (
-                <div
-                  key={face}
-                  className={cn(
-                    "group relative flex flex-col justify-between rounded-2xl border p-3 transition-all duration-200",
-                    selected
-                      ? "border-[var(--primary)] bg-[var(--surface-container-highest)] ring-2 ring-[var(--primary)]"
-                      : "border-[var(--line)] bg-[var(--surface)] hover:border-[var(--outline-variant)] hover:bg-[var(--surface-container-high)] shadow-xs"
-                  )}
-                >
-                  {/* Quick Expand button */}
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModalWidget(preview)}
-                    title={isRu ? "Развернуть во весь размер" : "Full unfolded preview"}
-                    className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--surface-container-highest)] text-[var(--muted)] opacity-70 hover:opacity-100 hover:text-[var(--fg)] hover:scale-110 transition"
-                  >
-                    <Maximize2 size={12} />
-                  </button>
-
-                  <div
-                    onClick={() => setPreviewModalWidget(preview)}
-                    className="mb-2 flex min-h-[120px] w-full cursor-zoom-in items-center justify-center overflow-visible rounded-xl py-1"
-                  >
-                    <FaceThumb widget={preview} maxWidth={220} maxHeight={120} />
-                  </div>
-
-                  <div className="flex items-center justify-between border-t border-[var(--line)] pt-2">
-                    <span className="truncate pr-1 text-[11px] font-medium text-[var(--fg)]">
-                      {t(`wf.f.${face}`)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onPickWeather(face)}
-                      className="shrink-0 rounded-full bg-[var(--primary)] px-3 py-1 text-[10px] font-semibold text-[var(--on-primary)] transition hover:opacity-90 active:scale-95 shadow-xs"
-                    >
-                      {isRu ? "+ Добавить" : "+ Add"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
-
-      {/* Clock Groups */}
-      {filteredClockGroups.map((group) => (
-        <section key={group.id} className="space-y-2 pt-1">
-          <div className="px-0.5">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--fg)]">
-              {group.title}
-            </h3>
-            <p className="text-[10px] text-[var(--muted)]">{group.desc}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {group.faces.map((face) => {
-              const preview: HomeWidget = {
-                ...DEFAULT_WIDGET,
-                ...FACE_META[face]?.defaults,
-                id: `preview-clock-${face}`,
-                face,
-                type: "clock",
-                color: base?.color ?? "primary",
-                label: "",
-                opacity: 100,
-              };
-              const selected = value === face;
-              return (
-                <div
-                  key={face}
-                  className={cn(
-                    "group relative flex flex-col items-center justify-between rounded-[20px] border p-2.5 transition-all duration-200",
-                    selected
-                      ? "border-[var(--primary)] bg-[var(--secondary-container)] ring-2 ring-[var(--primary)]"
-                      : "border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-container-high)] shadow-sm"
-                  )}
-                >
-                  {/* Quick Expand button */}
-                  <button
-                    type="button"
-                    onClick={() => setPreviewModalWidget(preview)}
-                    title={isRu ? "Развернуть во весь размер" : "Full unfolded preview"}
-                    className="absolute right-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--surface-container-highest)] text-[var(--muted)] opacity-60 hover:opacity-100 hover:text-[var(--fg)] transition"
-                  >
-                    <Maximize2 size={10} />
-                  </button>
-
-                  <div
-                    onClick={() => setPreviewModalWidget(preview)}
-                    className="mb-1.5 flex min-h-[84px] w-full cursor-zoom-in items-center justify-center overflow-visible py-1"
-                  >
-                    <FaceThumb widget={preview} maxWidth={130} maxHeight={84} />
-                  </div>
-
-                  <div className="flex w-full items-center justify-between gap-1 border-t border-[var(--line)] pt-1.5">
-                    <span className="truncate text-[11px] font-medium text-[var(--fg)]">
-                      {t(`wf.f.${face}`)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onPickClock(face)}
-                      className="shrink-0 rounded-full bg-[var(--surface-container-highest)] px-2.5 py-0.5 text-[10px] font-semibold text-[var(--fg)] hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition active:scale-95"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
-
-      {filteredWeatherGroups.length === 0 && filteredClockGroups.length === 0 && (
-        <div className="py-8 text-center text-xs text-[var(--muted)]">
-          {isRu ? "Ничего не найдено по вашему запросу" : "No widgets found matching your query"}
-        </div>
-      )}
-
-      {/* Live Full-Size Unfolded Preview Modal */}
-      {previewModalWidget && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in duration-200">
-          <div className="relative flex flex-col items-center max-w-sm w-full rounded-3xl bg-[var(--surface)] border border-[var(--line)] p-6 shadow-2xl">
-            <div className="flex w-full items-center justify-between pb-3 border-b border-[var(--line)]">
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--fg)]">
-                  {previewModalWidget.type === "weather"
-                    ? t(`wf.f.${previewModalWidget.face}`)
-                    : previewModalWidget.type === "bookmarks"
-                    ? (isRu ? "Папка закладок" : "Bookmarks")
-                    : t(`wf.f.${previewModalWidget.face}`)}
-                </h3>
-                <p className="text-[11px] text-[var(--muted)]">
-                  {isRu ? "Полноразмерный живой предпросмотр" : "Full unfolded live preview"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPreviewModalWidget(null)}
-                className="rounded-full p-1.5 text-[var(--muted)] hover:bg-[var(--surface-container-high)] hover:text-[var(--fg)] transition"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="my-5 flex items-center justify-center w-full min-h-[170px] p-2">
-              <Clock
-                widget={previewModalWidget}
-                width={280}
-                faceHeight={previewModalWidget.type === "weather" ? 170 : 190}
-              />
-            </div>
-
-            <div className="flex w-full gap-2 pt-2 border-t border-[var(--line)]">
-              <button
-                type="button"
-                onClick={() => {
-                  if (previewModalWidget.type === "weather") {
-                    onPickWeather(previewModalWidget.face as WeatherFaceId);
-                  } else if (previewModalWidget.type === "clock") {
-                    onPickClock(previewModalWidget.face as ClockFaceId);
-                  } else if (previewModalWidget.type === "bookmarks" && onPickBookmarks) {
-                    onPickBookmarks((previewModalWidget as BookmarksWidget).layout || "2x2");
-                  }
-                  setPreviewModalWidget(null);
-                }}
-                className={cn(BUTTON_PRIMARY, "flex-1 justify-center")}
-              >
-                {isRu ? "Добавить на экран" : "Add to home screen"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setPreviewModalWidget(null)}
-                className={cn(BUTTON, "px-4")}
-              >
-                {isRu ? "Закрыть" : "Close"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 type EditorProps = {
   widget: HomeWidget;
@@ -621,18 +136,12 @@ export function WidgetEditor({ widget, onChange, onDuplicate, onRemove, canDupli
               className={cn(INPUT, "h-11")}
             />
           </FieldRow>
-          <FieldRow label={isRu ? "Сетка (формат)" : "Layout"}>
+          <FieldRow label={isRu ? "Размер папки" : "Folder size"}>
             <Segmented
               label="Layout"
               value={widget.layout}
               onChange={(layout) => onChange({ layout: layout as BookmarksLayout })}
-              options={[
-                { value: "1x1", label: "1x1" },
-                { value: "2x1", label: "2x1" },
-                { value: "2x2", label: "2x2" },
-                { value: "4x1", label: "4x1" },
-                { value: "4x2", label: "4x2" },
-              ]}
+              options={BOOKMARK_LAYOUTS.map((value) => ({ value, label: BOOKMARK_LAYOUT_LABELS[value][isRu ? 1 : 0] }))}
             />
           </FieldRow>
           <SliderRow label={t("wg.size")} value={widget.size} min={SIZE_MIN} max={SIZE_MAX} step={4} unit=" px" onChange={(size) => onChange({ size })} />
@@ -941,13 +450,11 @@ export function SystemElementEditor({
             </button>
           </div>
         )}
-        <div className="p-1">
-          <p className="text-xs text-[var(--muted)]">{t("home.elementsDesc")}</p>
-        </div>
+        <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">{isRu ? "Размер и положение" : "Size & position"}</div>
         <div className={card}>
           <ToggleRow
             title={t("home.element.customPos")}
-            description="Drag freely on screen or keep centered"
+            description={isRu ? "Двигайте свободно по экрану или держите по центру" : "Drag freely on screen or keep centered"}
             checked={l.custom}
             onChange={(custom) => onChangeLayout({ logo: { ...l, custom } })}
           />
@@ -1296,7 +803,18 @@ export function LayoutControls({ layout, onChange }: { layout: HomeLayout; onCha
           ]}
         />
       </FieldRow>
-      {layout.mode === "grid" ? (
+      <FieldRow label={t("home.layout")} hint={layout.mode === "grid" ? t("home.gridHint") : undefined}>
+        <Segmented
+          label={t("home.layout")}
+          value={layout.mode}
+          onChange={(mode) => onChange({ mode })}
+          options={[
+            { value: "free", label: t("home.mode.free") },
+            { value: "grid", label: t("home.mode.grid") },
+          ]}
+        />
+      </FieldRow>
+      {layout.mode === "grid" && (
         <>
           <SliderRow label={t("home.cell")} value={layout.cell} {...limits(HOME_LAYOUT_SCHEMA.cell)} unit=" px" onChange={(cell) => onChange({ cell })} />
           <FieldRow label={t("home.showGrid")}>
@@ -1308,9 +826,13 @@ export function LayoutControls({ layout, onChange }: { layout: HomeLayout; onCha
             />
           </FieldRow>
         </>
-      ) : (
-        <ToggleRow title={t("home.guides")} description={t("home.guidesDesc")} checked={layout.guides} onChange={(guides) => onChange({ guides })} />
       )}
+      <ToggleRow
+        title={t("home.guides")}
+        description={t("home.guidesDesc")}
+        checked={layout.guides}
+        onChange={(guides) => onChange({ guides })}
+      />
     </div>
   );
 }
@@ -1362,6 +884,148 @@ export function WidgetList({ widgets, selectedId, onSelect, onDuplicate, onRemov
         );
       })}
       {!widgets.length && <p className="px-5 py-5 text-sm leading-6 text-[var(--muted)]">{t("home.empty")}</p>}
+    </div>
+  );
+}
+
+/* ---------- Better Search Bar editor ---------- */
+
+const SLOT_KIND_OPTIONS: { value: BarSlotKind; icon: typeof Sparkles; ru: string; en: string }[] = [
+  { value: "ai", icon: Sparkles, ru: "Режим ИИ", en: "AI mode" },
+  { value: "incognito", icon: EyeOff, ru: "Инкогнито", en: "Incognito" },
+  { value: "widget", icon: LayoutGrid, ru: "Виджет", en: "Widget" },
+  { value: "icon", icon: Sparkles, ru: "Иконка", en: "Icon" },
+];
+
+/** Full control over the two slots, the look and the defaults. */
+export function BetterBarEditor({
+  layout,
+  widgets,
+  onChange,
+}: {
+  layout: LauncherLayout["betterBar"];
+  widgets: HomeWidget[];
+  onChange: (patch: Partial<LauncherLayout["betterBar"]>) => void;
+}) {
+  const { t, lang } = useI18n();
+  const isRu = lang === "ru";
+  const c = layout.config;
+
+  const setSlot = (index: 0 | 1, patch: Partial<BarSlot>) => {
+    const slots = [...c.slots] as [BarSlot, BarSlot];
+    slots[index] = { ...slots[index], ...patch };
+    onChange({ config: { ...c, slots } });
+  };
+
+  const SlotCard = ({ index }: { index: 0 | 1 }) => {
+    const slot = c.slots[index];
+    const option = SLOT_KIND_OPTIONS.find((o) => o.value === slot.kind)!;
+    const Icon = option.icon;
+    return (
+      <div className="rounded-[20px] border border-[var(--line)] bg-[var(--surface)] overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-[var(--line)] bg-[var(--surface-container-high)] px-3 py-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[var(--primary)] text-[var(--on-primary)]">
+            <Icon size={13} aria-hidden="true" />
+          </span>
+          <span className="text-xs font-semibold">{index === 0 ? t("better.slot1") : t("better.slot2")}</span>
+        </div>
+
+        <div className="divide-y divide-[var(--line)]">
+          <FieldRow label={t("better.kind")}>
+            <Segmented
+              label={t("better.kind")}
+              value={slot.kind}
+              onChange={(kind) => setSlot(index, { kind, ref: kind === slot.kind ? slot.ref : undefined })}
+              options={SLOT_KIND_OPTIONS.map((o) => ({ value: o.value, label: isRu ? o.ru : o.en }))}
+            />
+          </FieldRow>
+
+          {slot.kind === "widget" && (
+            <FieldRow label={t("better.pickWidget")}>
+              {widgets.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {widgets.map((widget) => (
+                    <button
+                      key={widget.id}
+                      type="button"
+                      onClick={() => setSlot(index, { ref: widget.id })}
+                      className={cn(
+                        "flex h-9 items-center gap-2 rounded-full px-3 text-xs font-medium transition",
+                        slot.ref === widget.id
+                          ? "bg-[var(--primary)] text-[var(--on-primary)]"
+                          : "bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)]",
+                      )}
+                    >
+                      <span className="flex h-5 w-5 items-center justify-center overflow-hidden rounded-md bg-[var(--surface)]">
+                        <FaceThumb widget={widget} maxWidth={20} maxHeight={20} />
+                      </span>
+                      <span className="max-w-[110px] truncate">
+                        {widget.type === "custom_html" ? widget.title : widget.type === "bookmarks" ? widget.title : t(`wf.f.${widget.face}`)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-[var(--muted)]">{t("home.empty")}</p>
+              )}
+            </FieldRow>
+          )}
+
+          <FieldRow label={t("better.label")} hint={isRu ? "Оставьте пустым для стандартной подписи" : "Leave empty for the default label"}>
+            <input
+              value={slot.label ?? ""}
+              maxLength={40}
+              onChange={(e) => setSlot(index, { label: e.target.value })}
+              placeholder={isRu ? option.ru : option.en}
+              className={cn(INPUT, "h-11")}
+            />
+          </FieldRow>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <SlotCard index={0} />
+        <SlotCard index={1} />
+      </div>
+
+      <div className={cn(CARD, "divide-y divide-[var(--line)]")}>
+        <SliderRow label={t("better.height")} value={c.height} min={44} max={96} step={2} unit=" px" onChange={(height) => onChange({ config: { ...c, height } })} />
+        <SliderRow label={t("better.radius")} value={c.radius} min={0} max={48} step={2} unit=" px" onChange={(radius) => onChange({ config: { ...c, radius } })} />
+        <SliderRow label={t("sb.width")} value={layout.width} min={240} max={1100} step={8} unit=" px" onChange={(width) => onChange({ width })} />
+        <SliderRow label={t("home.element.scale")} value={layout.scale} min={50} max={200} step={5} unit=" %" onChange={(scale) => onChange({ scale })} />
+        <FieldRow label={t("better.placeholder")}>
+          <input
+            value={c.placeholder}
+            maxLength={80}
+            onChange={(e) => onChange({ config: { ...c, placeholder: e.target.value } })}
+            placeholder={t("better.placeholderPh")}
+            className={cn(INPUT, "h-11")}
+          />
+        </FieldRow>
+        <ToggleRow
+          title={t("better.showAttach")}
+          checked={c.attach}
+          onChange={(attach) => onChange({ config: { ...c, attach } })}
+        />
+        <ToggleRow
+          title={t("better.showVoice")}
+          checked={c.voice}
+          onChange={(voice) => onChange({ config: { ...c, voice } })}
+        />
+        <ToggleRow
+          title={t("better.aiDefault")}
+          checked={c.aiOn}
+          onChange={(aiOn) => onChange({ config: { ...c, aiOn } })}
+        />
+      </div>
+
+      <div className="rounded-[20px] border border-[var(--line)] bg-[var(--surface-container-high)] p-3 text-xs leading-5 text-[var(--muted)]">
+        {t("better.incognitoHint")}
+      </div>
     </div>
   );
 }

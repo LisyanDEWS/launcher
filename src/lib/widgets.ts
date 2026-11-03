@@ -7,6 +7,7 @@ import {
   DEFAULT_WEATHER_WIDGET,
   DEFAULT_HTML_WIDGET,
   DEFAULT_BOOKMARKS_WIDGET,
+  LEGACY_WEATHER_FACES,
   MAX_WIDGETS,
   type ClockFaceId,
   type ClockWidget,
@@ -27,70 +28,40 @@ export type Rect = { left: number; top: number; width: number; height: number };
 export const SIZE_MIN = 80;
 export const SIZE_MAX = 520;
 const EDGE = 24;
+/** Minimum breathing room between widgets when they are auto-placed or duplicated. */
+export const GAP = 20;
 
 export const BOOKMARK_RATIOS: Record<BookmarksLayout, number> = {
   "1x1": 1.0,
-  "2x1": 2.0,
-  "2x2": 1.05,
-  "4x1": 3.2,
-  "4x2": 2.0,
+  "2x1": 2.3,
+  "2x2": 1.1,
+  "4x1": 4.2,
+  "4x2": 2.1,
+};
+
+const MATERIAL_WEATHER_RATIOS: Record<WeatherFaceId, number> = {
+  m3w_now: 1.45,
+  m3w_shape: 1,
+  m3w_pill: 3,
+  m3w_details: 1,
+  m3w_hourly: 2.1,
+  m3w_daily: 2.1,
+  m3w_rain: 1.8,
+  m3w_sun: 1.6,
+  m3w_wind: 1,
+  m3w_humidity: 1,
+  m3w_feels: 1,
+  m3w_uv: 1.15,
+  m3w_air: 1,
+  m3w_moon: 1,
+  m3w_combo: 2.2,
 };
 
 export const WEATHER_RATIOS: Record<string, number> = {
-  w01_sunny: 1.45,
-  w02_partly_cloudy: 1.4,
-  w12_humidity_ring: 1.4,
-  w15_rain_chance: 1.6,
+  ...Object.fromEntries(Object.entries(LEGACY_WEATHER_FACES).map(([legacy, id]) => [legacy, MATERIAL_WEATHER_RATIOS[id]])),
+  ...MATERIAL_WEATHER_RATIOS,
   html: 1.45,
   bookmarks: 1.05,
-  // Fallbacks for previous sessions
-  w03_rainy: 1.45,
-  w04_thunderstorm: 1.45,
-  w05_snowfall: 1.45,
-  w06_clear_night: 1.45,
-  w07_windy: 1.45,
-  w08_foggy: 1.45,
-  w09_hot_humid: 1.45,
-  w10_uv: 1.3,
-  w11_wind_compass: 1.25,
-  w13_aqi: 1.3,
-  w14_pressure: 1.3,
-  w16_pollen: 1.35,
-  w17_feels_like: 1.35,
-  w18_sun_cycle: 1.5,
-  w19_moon_phase: 1.25,
-  w20_forecast_5d: 1.5,
-  w21_hourly: 1.7,
-  w22_temp_trend: 1.6,
-  w23_weekly_rain: 1.55,
-  w24_alert: 1.55,
-  w25_city_hero: 1.45,
-  weather_glyph: 1.25,
-  weather_classic: 1.25,
-  weather_minimal: 1.35,
-  weather_pill: 1.6,
-  weather_compact: 1.25,
-  weather_forecast_5d: 1.4,
-  weather_hourly: 1.7,
-  weather_gauge: 1.15,
-  weather_wind_compass: 1.1,
-  weather_sun_cycle: 1.45,
-  weather_air_quality: 1.2,
-  weather_humidity_rain: 1.35,
-  weather_matrix_dot: 1.25,
-  weather_dynamic_sky: 1.25,
-  weather_neo_brutal: 1.25,
-  weather_glass: 1.25,
-  weather_pressure_baro: 1.15,
-  weather_combo_clock: 1.6,
-  weather_capsule_vert: 0.6,
-  weather_radar_badge: 1.1,
-  weather_thermometer: 1.25,
-  weather_moon_phase: 1.1,
-  weather_comfort_index: 1.3,
-  weather_weekly_table: 1.4,
-  weather_cyber_hud: 1.5,
-  weather_island: 1.7,
 };
 
 export const readViewport = (): Viewport => ({
@@ -230,7 +201,7 @@ function findFreeSpot(width: number, height: number, taken: Rect[], viewport: Vi
   const start = Math.ceil(EDGE / step) * step;
   for (let top = start; top + height <= viewport.h - EDGE / 2; top += step) {
     for (let left = start; left + width <= viewport.w - EDGE / 2; left += step) {
-      const padded = { left: left - 12, top: top - 12, width: width + 24, height: height + 24 };
+      const padded = { left: left - GAP, top: top - GAP, width: width + GAP * 2, height: height + GAP * 2 };
       if (!taken.some((rect) => intersects(padded, rect))) return { left, top };
     }
   }
@@ -244,9 +215,9 @@ export function createClockWidget(face: ClockFaceId, id: string, settings: Setti
   const layout = settings.homeLayout;
   const taken = getOccupiedRects(settings, viewport);
   const count = settings.widgets.length;
-  const spot = findFreeSpot(width, height, taken, viewport, layout.mode === "grid" ? layout.cell : 16) ?? {
-    left: EDGE + (count % 8) * 28,
-    top: EDGE + (count % 8) * 28,
+  const spot = findFreeSpot(width, height, taken, viewport, layout.mode === "grid" ? layout.cell : GAP) ?? {
+    left: EDGE + (count % 6) * (GAP + 16),
+    top: EDGE + (count % 6) * (GAP + 16),
   };
   return { ...base, ...toPosition({ left: spot.left, top: spot.top, width, height }, viewport) };
 }
@@ -258,9 +229,9 @@ export function createWeatherWidget(face: WeatherFaceId, id: string, settings: S
   const layout = settings.homeLayout;
   const taken = getOccupiedRects(settings, viewport);
   const count = settings.widgets.length;
-  const spot = findFreeSpot(width, height, taken, viewport, layout.mode === "grid" ? layout.cell : 16) ?? {
-    left: EDGE + (count % 8) * 28,
-    top: EDGE + (count % 8) * 28,
+  const spot = findFreeSpot(width, height, taken, viewport, layout.mode === "grid" ? layout.cell : GAP) ?? {
+    left: EDGE + (count % 6) * (GAP + 16),
+    top: EDGE + (count % 6) * (GAP + 16),
   };
   return { ...base, ...toPosition({ left: spot.left, top: spot.top, width, height }, viewport) };
 }
@@ -279,9 +250,9 @@ export function createHtmlWidget(id: string, settings: Settings, viewport: Viewp
   const layout = settings.homeLayout;
   const taken = getOccupiedRects(settings, viewport);
   const count = settings.widgets.length;
-  const spot = findFreeSpot(width, height, taken, viewport, layout.mode === "grid" ? layout.cell : 16) ?? {
-    left: EDGE + (count % 8) * 28,
-    top: EDGE + (count % 8) * 28,
+  const spot = findFreeSpot(width, height, taken, viewport, layout.mode === "grid" ? layout.cell : GAP) ?? {
+    left: EDGE + (count % 6) * (GAP + 16),
+    top: EDGE + (count % 6) * (GAP + 16),
   };
   return { ...base, ...toPosition({ left: spot.left, top: spot.top, width, height }, viewport) };
 }
@@ -305,16 +276,16 @@ export function createBookmarksWidget(
   const { width, height } = widgetSize(base);
   const taken = getOccupiedRects(settings, viewport);
   const count = settings.widgets.length;
-  const spot = findFreeSpot(width, height, taken, viewport, settings.homeLayout.mode === "grid" ? settings.homeLayout.cell : 16) ?? {
-    left: EDGE + (count % 8) * 28,
-    top: EDGE + (count % 8) * 28,
+  const spot = findFreeSpot(width, height, taken, viewport, settings.homeLayout.mode === "grid" ? settings.homeLayout.cell : GAP) ?? {
+    left: EDGE + (count % 6) * (GAP + 16),
+    top: EDGE + (count % 6) * (GAP + 16),
   };
   return { ...base, ...toPosition({ left: spot.left, top: spot.top, width, height }, viewport) };
 }
 
 export function duplicateOf(source: HomeWidget, id: string, settings: Settings, viewport: Viewport): HomeWidget {
   const rect = widgetRect(source, viewport, settings.homeLayout);
-  const shift = settings.homeLayout.mode === "grid" ? settings.homeLayout.cell : 24;
+  const shift = settings.homeLayout.mode === "grid" ? settings.homeLayout.cell : GAP + 8;
   const left = rect.left + shift + rect.width <= viewport.w ? rect.left + shift : Math.max(0, rect.left - shift);
   const top = rect.top + shift + rect.height <= viewport.h ? rect.top + shift : Math.max(0, rect.top - shift);
   return { ...source, id, ...toPosition({ ...rect, left, top }, viewport) };

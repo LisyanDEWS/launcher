@@ -4,6 +4,7 @@ import { useWeather } from "../../lib/weather";
 import { useNow, getClockTime } from "../../lib/clock";
 import { useI18n } from "../../lib/i18n";
 import ErrorBoundary from "../ErrorBoundary";
+import SandboxHtmlFrame from "../SandboxHtmlFrame";
 
 type Props = {
   widget: CustomHtmlWidget;
@@ -11,7 +12,7 @@ type Props = {
   height: number;
 };
 
-export default function CustomHtmlFace({ widget, width, height }: Props) {
+export default function CustomHtmlFace({ widget }: Props) {
   const { lang } = useI18n();
   const isRu = lang === "ru";
   const now = useNow();
@@ -63,13 +64,11 @@ export default function CustomHtmlFace({ widget, width, height }: Props) {
         </div>
       }
     >
-      <div
-        className="relative h-full w-full overflow-hidden rounded-[28px]"
-        style={{
-          width: "100%",
-          height: "100%",
-        }}
-        dangerouslySetInnerHTML={{ __html: renderedHtml }}
+      <SandboxHtmlFrame
+        html={renderedHtml}
+        title={isRu ? "HTML-виджет" : "HTML widget"}
+        fontFamily={undefined}
+        className="h-full w-full"
       />
     </ErrorBoundary>
   );

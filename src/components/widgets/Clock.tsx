@@ -42,11 +42,11 @@ export default function Clock({ widget, width, faceHeight, captionHeight = 0, ca
       <div
         className={cn("wf", halo && "wf--halo")}
         data-role={widget.color}
-        role="img"
+        role="group"
         aria-label={label}
         style={{ width, height: faceHeight + captionHeight, opacity: widget.opacity / 100 }}
       >
-        <div className="wf-face" style={{ height: faceHeight }} aria-hidden="true">
+        <div className="wf-face" style={{ height: faceHeight }}>
           <BookmarksWidgetFace widget={widget} width={width} faceHeight={faceHeight} />
         </div>
         {captionHeight > 0 && (
@@ -81,7 +81,7 @@ export default function Clock({ widget, width, faceHeight, captionHeight = 0, ca
   }
 
   if (widget.type === "weather") {
-    const WeatherFace = WEATHER_COMPONENTS[widget.face] ?? WEATHER_COMPONENTS.w01_sunny;
+    const WeatherFace = WEATHER_COMPONENTS[widget.face] ?? WEATHER_COMPONENTS.m3w_now;
     const label = `${t(`wf.f.${widget.face}`)}: ${widget.city}${caption ? `, ${caption}` : ""}`;
 
     return (

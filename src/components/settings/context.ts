@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { LanguageCode } from "../../i18n/languages";
+import type { RestorePayload } from "../../lib/backup";
 import type { MatrixSupport } from "../../lib/i18n";
 import type { Bookmark, FontTheme, SearchStyle, Settings, SettingsSection, TextAnim } from "../../lib/settings";
 import type { WallpaperController } from "../../lib/wallpaper";
@@ -21,6 +22,7 @@ export type SettingsContextValue = {
   history: string[];
   removeBookmark: (id: string) => void;
   clearHistory: () => void;
+  restoreBackup: (backup: RestorePayload) => Promise<void>;
   addBookmark: () => void;
   goTo: (section: SettingsSection) => void;
   toast: (text: string) => void;
