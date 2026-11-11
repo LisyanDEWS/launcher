@@ -1,7 +1,7 @@
 import { CalendarDays, Check, Clock3, Cloud, Code2, EyeOff, Folder, Grid3x3, LayoutDashboard, LayoutGrid, List, Move, Plus, Search, Settings2, Sparkles, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { BetterBarEditor, FaceGallery, LayoutControls, SystemElementEditor, WidgetEditor, WidgetList } from "./editor";
+import { FaceGallery, LayoutControls, SystemElementEditor, WidgetEditor, WidgetList } from "./editor";
 import type { GalleryTab } from "./FaceGallery";
 import HtmlWidgetWorkspace from "./HtmlWidgetWorkspace";
 import LogoStudio from "../settings/LogoStudio";
@@ -12,7 +12,7 @@ import { useStageLayout } from "../../lib/stage";
 import type { WidgetActions } from "../../lib/widgets";
 import { cn } from "../../utils/cn";
 
-type SystemKey = "__system_search__" | "__system_logo__" | "__system_buttons__" | "__system_add_button__" | "__system_better_bar__";
+type SystemKey = "__system_search__" | "__system_logo__" | "__system_buttons__";
 
 type Props = {
   widgets: HomeWidget[];
@@ -27,6 +27,8 @@ type Props = {
   onResetElementCenter: (elementKey: SystemKey) => void;
   onRequestRemoveSearch?: () => void;
   onSelect: (id: string | null) => void;
+  /** Changes when an element's own "Settings" button is pressed. */
+  settingsSignal?: number;
   onExit: () => void;
   settings: Settings;
   onUpdateSettings: (patch: Partial<Settings>) => void;
@@ -67,6 +69,7 @@ export default function EditChrome({
   onResetElementCenter,
   onRequestRemoveSearch,
   onSelect,
+  settingsSignal,
   onExit,
   settings,
   onUpdateSettings,
@@ -84,9 +87,7 @@ export default function EditChrome({
   const isSystem =
     selectedId === "__system_search__" ||
     selectedId === "__system_logo__" ||
-    selectedId === "__system_buttons__" ||
-    selectedId === "__system_add_button__" ||
-    selectedId === "__system_better_bar__";
+    selectedId === "__system_buttons__";
   const selectedWidget = widgets.find((widget) => widget.id === selectedId) ?? null;
   const hasSelection = isSystem || Boolean(selectedWidget);
   const full = widgets.length >= MAX_WIDGETS;
@@ -95,8 +96,6 @@ export default function EditChrome({
     { key: "__system_search__", icon: Search, short: isRu ? "Поиск" : "Search", label: t("home.element.search"), visible: launcherLayout.search.visible },
     { key: "__system_logo__", icon: Sparkles, short: isRu ? "Логотип" : "Logo", label: t("home.element.logo"), visible: launcherLayout.logo.visible },
     { key: "__system_buttons__", icon: LayoutGrid, short: isRu ? "Кнопки" : "Buttons", label: t("home.element.buttons"), visible: launcherLayout.buttons.visible },
-    { key: "__system_add_button__", icon: Plus, short: isRu ? "Добавить" : "Add", label: t("home.element.addButton"), visible: launcherLayout.addButton.visible },
-    { key: "__system_better_bar__", icon: Search, short: isRu ? "Лучшая" : "Better", label: t("better.title"), visible: launcherLayout.betterBar.visible },
   ];
 
   const title = isSystem
@@ -104,7 +103,9 @@ export default function EditChrome({
     : selectedWidget
       ? selectedWidget.type === "custom_html"
         ? selectedWidget.title || "Custom Widget"
-        : selectedWidget.type === "bookmarks"
+        : selectedWidget.type === "shortcut"
+          ? selectedWidget.title || t("wf.f.shortcut")
+          : selectedWidget.type === "bookmarks"
           ? selectedWidget.title || t("wf.f.bookmarks")
           : t(`wf.f.${selectedWidget.face}`)
       : "";
@@ -114,6 +115,11 @@ export default function EditChrome({
     // Picking something on the card dismisses a browsing panel; the settings panel follows the new selection.
     setSheet((current) => (selectedId ? (current === "settings" ? current : null) : current === "settings" ? null : current));
   }, [selectedId]);
+
+  // An element's own "Settings" button opens the properties panel on it.
+  useEffect(() => {
+    if (settingsSignal) setSheet("settings");
+  }, [settingsSignal]);
 
   // Esc closes the open panel first; only then does it reach the app (deselect → finish editing).
   useEffect(() => {
@@ -290,23 +296,15 @@ export default function EditChrome({
               {sheet === "settings" && isSystem ? (
                 <div className="space-y-3">
                   {selectedId === "__system_logo__" && <LogoStudio settings={settings} update={onUpdateSettings} dense />}
-                  {selectedId === "__system_better_bar__" ? (
-                    <BetterBarEditor
-                      layout={launcherLayout.betterBar}
-                      widgets={widgets}
-                      onChange={(patch: Partial<LauncherLayout["betterBar"]>) => onChangeLauncherLayout({ betterBar: { ...launcherLayout.betterBar, ...patch } })}
-                    />
-                  ) : (
-                    <SystemElementEditor
-                      elementKey={selectedId as "__system_logo__" | "__system_search__" | "__system_buttons__" | "__system_add_button__"}
-                      layout={launcherLayout}
-                      style={searchStyle}
-                      onChangeLayout={onChangeLauncherLayout}
-                      onChangeStyle={onChangeSearchStyle}
-                      onResetCenter={() => onResetElementCenter(selectedId as "__system_logo__" | "__system_search__" | "__system_buttons__" | "__system_add_button__")}
-                      onRequestRemove={onRequestRemoveSearch}
-                    />
-                  )}
+                  <SystemElementEditor
+                    elementKey={selectedId as "__system_logo__" | "__system_search__" | "__system_buttons__"}
+                    layout={launcherLayout}
+                    style={searchStyle}
+                    onChangeLayout={onChangeLauncherLayout}
+                    onChangeStyle={onChangeSearchStyle}
+                    onResetCenter={() => onResetElementCenter(selectedId as "__system_logo__" | "__system_search__" | "__system_buttons__")}
+                    onRequestRemove={onRequestRemoveSearch}
+                  />
                 </div>
               ) : sheet === "settings" && selectedWidget ? (
                 <WidgetEditor
@@ -328,6 +326,7 @@ export default function EditChrome({
                   onPickClock={(face) => added(actions.add(face))}
                   onPickWeather={(face) => added(actions.addWeather(face))}
                   onPickBookmarks={(bookmarkLayout) => added(actions.addBookmarks(bookmarkLayout))}
+                  onPickShortcut={(data) => added(actions.addShortcut(data))}
                   onOpenHtmlStudio={() => openHtmlStudio(null)}
                 />
               ) : (

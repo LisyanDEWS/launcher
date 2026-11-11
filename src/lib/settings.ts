@@ -28,6 +28,8 @@ export type SettingsSection =
   | "language"
   | "bookmarks"
   | "betterbar"
+  | "news"
+  | "favicon"
   | "appmenu"
   | "backup"
   | "developer"
@@ -262,7 +264,12 @@ export type BaseWidget = {
   id: string;
   x: number;
   y: number;
+  /** Legacy pixel size (kept for old saves; spans below decide the real size). */
   size: number;
+  /** Width in grid cells. Missing → the default for the widget's shape. */
+  cols?: number;
+  /** Height in grid cells. Round widgets always use cols = rows. */
+  rows?: number;
   color: (typeof WIDGET_COLORS)[number];
   opacity: number;
 };
@@ -308,7 +315,21 @@ export type BookmarksWidget = BaseWidget & {
   columns?: number;
 };
 
-export type HomeWidget = ClockWidget | WeatherWidget | CustomHtmlWidget | BookmarksWidget;
+/** One website as a round home-screen shortcut (an Android-style app icon). */
+export type ShortcutWidget = BaseWidget & {
+  type: "shortcut";
+  face: "shortcut";
+  url: string;
+  title: string;
+  label: string;
+  /** Optional uploaded icon (data URL); otherwise the site's favicon is used. */
+  customIcon: string;
+  /** original = the site's own colours; themed = repainted in the palette like the app menu. */
+  iconStyle: "original" | "themed";
+  showTitle: boolean;
+};
+
+export type HomeWidget = ClockWidget | WeatherWidget | CustomHtmlWidget | BookmarksWidget | ShortcutWidget;
 
 export type HomeLayout = {
   mode: "free" | "grid";
@@ -331,6 +352,11 @@ export type ButtonsPosition = ElementPosition & {
   columns: number;
   iconSize: number;
   showAddButton?: boolean;
+  /** Shortcut rows under the search bar (the row never gets wider than the bar). */
+  rows?: number;
+  showLabels?: boolean;
+  /** A "+" tile at the end of the row while there is room for another shortcut. */
+  addTile?: boolean;
 };
 
 export type LauncherLayout = {
@@ -358,7 +384,7 @@ export const DEFAULT_BETTER_BAR: BetterBarConfig = {
 export const DEFAULT_LAUNCHER_LAYOUT: LauncherLayout = {
   logo: { custom: false, x: 0.5, y: 0.12, width: 340, scale: 100, visible: true },
   search: { custom: false, x: 0.5, y: 0.28, width: 672, scale: 100, visible: true },
-  buttons: { custom: false, x: 0.5, y: 0.44, width: 672, scale: 100, visible: true, columns: 6, iconSize: 56, showAddButton: false },
+  buttons: { custom: false, x: 0.5, y: 0.44, width: 672, scale: 100, visible: true, columns: 6, iconSize: 56, showAddButton: false, rows: 2, showLabels: true, addTile: true },
   addButton: { custom: false, x: 0.5, y: 0.60, width: 220, scale: 100, visible: false },
   betterBar: { custom: false, x: 0.5, y: 0.62, width: 672, scale: 100, visible: false, config: DEFAULT_BETTER_BAR },
 };
@@ -425,6 +451,25 @@ export const DEFAULT_HTML_WIDGET: CustomHtmlWidget = {
 </div>`,
 };
 
+export const DEFAULT_SHORTCUT_WIDGET: ShortcutWidget = {
+  id: "",
+  type: "shortcut",
+  face: "shortcut",
+  x: 0.5,
+  y: 0.5,
+  size: 96,
+  cols: 1,
+  rows: 1,
+  color: "primary",
+  opacity: 100,
+  url: "https://www.google.com/",
+  title: "Google",
+  label: "",
+  customIcon: "",
+  iconStyle: "themed",
+  showTitle: true,
+};
+
 export const DEFAULT_BOOKMARKS_WIDGET: BookmarksWidget = {
   id: "",
   type: "bookmarks",
@@ -444,7 +489,7 @@ export const DEFAULT_BOOKMARKS_WIDGET: BookmarksWidget = {
   columns: 2,
 };
 
-export const DEFAULT_HOME_LAYOUT: HomeLayout = { mode: "free", cell: 32, showGrid: "editing", guides: true };
+export const DEFAULT_HOME_LAYOUT: HomeLayout = { mode: "grid", cell: 88, showGrid: "editing", guides: true };
 
 /* ---------- app menu (the 9-dot drawer) ---------- */
 
@@ -461,8 +506,99 @@ export const MENU_ICON_SIZE = { min: 32, max: 56, default: 40 } as const;
 // Favicon theming for other sites (the generated userscript).
 export const FAVICON_MODES = ["themed", "mono", "original"] as const;
 export type FaviconMode = (typeof FAVICON_MODES)[number];
-export type FaviconTheme = { mode: FaviconMode; color: string };
-export const DEFAULT_FAVICON_THEME: FaviconTheme = { mode: "themed", color: "#f5f5f7" };
+export type FaviconTheme = {
+  mode: FaviconMode;
+  color: string;
+  auto: boolean;
+  useThemeColor: boolean;
+  /** Browser favicon cache lifetime after the last visit, in days. */
+  cacheDays: number;
+  /** Resolved theme tones for the extension (computed at sync time, never stored in settings). */
+  palette?: import("./favicon-recolor").FaviconPalette;
+};
+export const DEFAULT_FAVICON_THEME: FaviconTheme = { mode: "themed", color: "#f5f5f7", auto: true, useThemeColor: true, cacheDays: 5 };
+
+/* ---------- quick pills under the search bar ---------- */
+
+export const QUICK_PILL_KINDS = ["incognito", "ai", "news", "voice", "lens", "attach", "custom"] as const;
+export type QuickPillKind = (typeof QUICK_PILL_KINDS)[number];
+
+export type QuickPill = {
+  id: string;
+  kind: QuickPillKind;
+  /** User label; empty means the localised built-in label. */
+  label: string;
+  enabled: boolean;
+  /** Only for kind = custom. */
+  url?: string;
+};
+
+export type QuickPills = {
+  enabled: boolean;
+  /** Height in px. Pills otherwise inherit the search bar's shape and surface. */
+  height: number;
+  showLabels: boolean;
+  showIcons: boolean;
+  /** Add a little separation from the search bar. */
+  gap: number;
+  items: QuickPill[];
+};
+
+export const DEFAULT_QUICK_PILLS: QuickPills = {
+  enabled: true,
+  height: 38,
+  showLabels: true,
+  showIcons: true,
+  gap: 10,
+  items: [
+    { id: "pill-incognito", kind: "incognito", label: "", enabled: true },
+    { id: "pill-ai", kind: "ai", label: "", enabled: true },
+  ],
+};
+
+/* ---------- news feed ---------- */
+
+export const NEWS_SOURCES = ["mix", "google", "hackernews", "bbc", "verge", "guardian", "wired", "nyt", "techcrunch", "arstechnica", "nature", "espn"] as const;
+export type NewsSource = (typeof NEWS_SOURCES)[number];
+export const NEWS_TOPICS = ["top", "tech", "ai", "science", "business", "world", "culture", "sport"] as const;
+export type NewsTopic = (typeof NEWS_TOPICS)[number];
+export const NEWS_LAYOUTS = ["cards", "list"] as const;
+export type NewsLayout = (typeof NEWS_LAYOUTS)[number];
+
+export type NewsSettings = {
+  enabled: boolean;
+  source: NewsSource;
+  topics: NewsTopic[];
+  count: number;
+  layout: NewsLayout;
+  showImages: boolean;
+  showSource: boolean;
+  showTopicChips: boolean;
+  openInNewTab: boolean;
+  region: "ru" | "us" | "global";
+  /** Photos are repainted in the palette (duotone / monochrome) so the feed matches the theme. */
+  imageTone: "color" | "duotone" | "mono";
+  /** Rank stories by what you opened before (stored locally, never sent anywhere). */
+  personalize: boolean;
+  /** Which sources feed each topic in "mix" mode. Absent = the curated default for that topic. */
+  topicSources: Partial<Record<NewsTopic, NewsSource[]>>;
+};
+
+export const DEFAULT_NEWS: NewsSettings = {
+  enabled: true,
+  source: "mix",
+  topics: ["top", "tech", "ai"],
+  count: 6,
+  layout: "cards",
+  showImages: true,
+  showSource: true,
+  showTopicChips: true,
+  openInNewTab: true,
+  region: "ru",
+  imageTone: "color",
+  personalize: true,
+  topicSources: {},
+};
 
 /** How the AI search is triggered: a one-shot button, or a persistent toggle (nicer on a desktop). */
 export const AI_MODES = ["button", "toggle"] as const;
@@ -543,7 +679,82 @@ function sanitizeFaviconTheme(raw: unknown): FaviconTheme {
   const r = raw as Record<string, unknown>;
   const mode = typeof r.mode === "string" && (FAVICON_MODES as readonly string[]).includes(r.mode) ? (r.mode as FaviconMode) : DEFAULT_FAVICON_THEME.mode;
   const color = typeof r.color === "string" && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color : DEFAULT_FAVICON_THEME.color;
-  return { mode, color };
+  return {
+    mode,
+    color,
+    auto: typeof r.auto === "boolean" ? r.auto : DEFAULT_FAVICON_THEME.auto,
+    useThemeColor: typeof r.useThemeColor === "boolean" ? r.useThemeColor : DEFAULT_FAVICON_THEME.useThemeColor,
+    cacheDays: typeof r.cacheDays === "number" && Number.isFinite(r.cacheDays) ? Math.min(90, Math.max(1, Math.round(r.cacheDays))) : DEFAULT_FAVICON_THEME.cacheDays,
+  };
+}
+
+/* ---------- quick pills / news / FoxNano validation ---------- */
+
+function sanitizeQuickPills(raw: unknown): QuickPills {
+  if (!raw || typeof raw !== "object") return DEFAULT_QUICK_PILLS;
+  const r = raw as Record<string, unknown>;
+  const seen = new Set<string>();
+  const items = (Array.isArray(r.items) ? r.items : DEFAULT_QUICK_PILLS.items)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item, index) => {
+      const kind = item.kind === "foxnano" ? "ai" : (QUICK_PILL_KINDS as readonly string[]).includes(item.kind as string) ? (item.kind as QuickPillKind) : "custom";
+      const id = typeof item.id === "string" && item.id.trim() ? item.id.slice(0, 64) : `pill-${index}`;
+      return {
+        id: seen.has(id) ? `${id}-${index}` : id,
+        kind,
+        label: typeof item.label === "string" ? item.label.slice(0, 32) : "",
+        enabled: item.enabled !== false,
+        url: safeWebUrl(item.url),
+      };
+    })
+    .filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    })
+    .slice(0, 8);
+  return {
+    enabled: r.enabled !== false,
+    height: typeof r.height === "number" && Number.isFinite(r.height) ? Math.round(Math.min(56, Math.max(28, r.height))) : DEFAULT_QUICK_PILLS.height,
+    showLabels: r.showLabels !== false,
+    showIcons: r.showIcons !== false,
+    gap: typeof r.gap === "number" && Number.isFinite(r.gap) ? Math.round(Math.min(28, Math.max(0, r.gap))) : DEFAULT_QUICK_PILLS.gap,
+    items: items.length ? items : DEFAULT_QUICK_PILLS.items,
+  };
+}
+
+function sanitizeTopicSources(raw: unknown): Partial<Record<NewsTopic, NewsSource[]>> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Partial<Record<NewsTopic, NewsSource[]>> = {};
+  for (const [topic, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(NEWS_TOPICS as readonly string[]).includes(topic) || !Array.isArray(list)) continue;
+    const sources = [...new Set(list.filter((x): x is NewsSource => (NEWS_SOURCES as readonly string[]).includes(x as string) && x !== "mix"))].slice(0, 12);
+    if (sources.length) out[topic as NewsTopic] = sources;
+  }
+  return out;
+}
+
+function sanitizeNews(raw: unknown): NewsSettings {
+  if (!raw || typeof raw !== "object") return DEFAULT_NEWS;
+  const r = raw as Record<string, unknown>;
+  const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+    typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+  const topics = [...new Set((Array.isArray(r.topics) ? r.topics : DEFAULT_NEWS.topics).filter((topic): topic is NewsTopic => (NEWS_TOPICS as readonly string[]).includes(topic as string)))].slice(0, 6);
+  return {
+    enabled: r.enabled !== false,
+    source: r.source === "reuters" ? "mix" : pick(r.source, NEWS_SOURCES, DEFAULT_NEWS.source),
+    topics: topics.length ? topics : DEFAULT_NEWS.topics,
+    count: typeof r.count === "number" && Number.isFinite(r.count) ? Math.round(Math.min(16, Math.max(2, r.count))) : DEFAULT_NEWS.count,
+    layout: pick(r.layout, NEWS_LAYOUTS, DEFAULT_NEWS.layout),
+    showImages: r.showImages !== false,
+    showSource: r.showSource !== false,
+    showTopicChips: r.showTopicChips !== false,
+    openInNewTab: r.openInNewTab !== false,
+    region: pick(r.region, ["ru", "us", "global"] as const, DEFAULT_NEWS.region),
+    imageTone: pick(r.imageTone, ["color", "duotone", "mono"] as const, DEFAULT_NEWS.imageTone),
+    personalize: r.personalize !== false,
+    topicSources: sanitizeTopicSources(r.topicSources),
+  };
 }
 
 function sanitizeAppMenu(raw: unknown): AppMenuSettings {
@@ -619,11 +830,14 @@ export type Settings = {
   launcherLayout: LauncherLayout;
   appMenu: AppMenuSettings;
   faviconTheme: FaviconTheme;
+  quickPills: QuickPills;
+  news: NewsSettings;
 };
 
 export const BOOKMARKS_KEY = "lisyan_bookmarks";
 export const SETTINGS_KEY = "lisyan_settings";
 export const HISTORY_KEY = "lisyan_search_history";
+export const AI_HISTORY_KEY = "lisyan_ai_history";
 
 export const DEFAULT_SEARCH_STYLE: SearchStyle = {
   preset: "expressive",
@@ -646,13 +860,13 @@ export const DEFAULT_SEARCH_STYLE: SearchStyle = {
   button: "filled",
   offsetTop: 16,
   placeholder: "",
-  aiButton: true,
+  aiButton: false,
   aiButtonSize: 34,
   aiButtonStyle: "accent",
   aiButtonIcon: "sparkles",
   aiButtonUrl: "https://www.google.com/search?q={q}&udm=50",
   aiMode: "toggle",
-  aiDefaultOn: true,
+  aiDefaultOn: false,
 };
 
 const SEARCH_PRESETS: Record<SearchPresetId, Partial<SearchStyle>> = {
@@ -705,7 +919,10 @@ export function applyAnimPreset(current: TextAnim, id: AnimPresetId): TextAnim {
   return { ...current, ...ANIM_PRESETS[id], preset: id };
 }
 
-type FlatSettings = Omit<Settings, "searchStyle" | "textAnim" | "widgets" | "homeLayout" | "launcherLayout" | "appMenu" | "faviconTheme">;
+type FlatSettings = Omit<
+  Settings,
+  "searchStyle" | "textAnim" | "widgets" | "homeLayout" | "launcherLayout" | "appMenu" | "faviconTheme" | "quickPills" | "news"
+>;
 
 const DEFAULT_FLAT: FlatSettings = {
   language: "auto",
@@ -746,6 +963,8 @@ export const DEFAULT_SETTINGS: Settings = {
   launcherLayout: DEFAULT_LAUNCHER_LAYOUT,
   appMenu: DEFAULT_APP_MENU,
   faviconTheme: DEFAULT_FAVICON_THEME,
+  quickPills: DEFAULT_QUICK_PILLS,
+  news: DEFAULT_NEWS,
 };
 
 /* ---------- schema: validation of stored data + slider ranges ---------- */
@@ -852,6 +1071,8 @@ export const WIDGET_SCHEMA: Schema<ClockWidget> = {
   x: num(0, 1, 0.0001),
   y: num(0, 1, 0.0001),
   size: num(80, 520),
+  cols: num(1, 12),
+  rows: num(1, 12),
   color: oneOf(WIDGET_COLORS),
   seconds: oneOf(SECOND_MODES),
   date: BOOL,
@@ -868,6 +1089,8 @@ export const WEATHER_WIDGET_SCHEMA: Schema<WeatherWidget> = {
   x: num(0, 1, 0.0001),
   y: num(0, 1, 0.0001),
   size: num(80, 520),
+  cols: num(1, 12),
+  rows: num(1, 12),
   color: oneOf(WIDGET_COLORS),
   city: str(64),
   unit: oneOf(["c", "f"]),
@@ -883,12 +1106,33 @@ export const CUSTOM_HTML_SCHEMA: Schema<CustomHtmlWidget> = {
   x: num(0, 1, 0.0001),
   y: num(0, 1, 0.0001),
   size: num(80, 520),
+  cols: num(1, 12),
+  rows: num(1, 12),
   color: oneOf(WIDGET_COLORS),
   html: str(20000),
   title: str(64),
   label: str(40),
   opacity: num(20, 100),
   styleVariant: oneOf(["m3", "matrix"]),
+};
+
+export const SHORTCUT_WIDGET_SCHEMA: Schema<ShortcutWidget> = {
+  id: str(64),
+  type: oneOf(["shortcut"]),
+  face: oneOf(["shortcut"]),
+  x: num(0, 1, 0.0001),
+  y: num(0, 1, 0.0001),
+  size: num(80, 520),
+  cols: num(1, 12),
+  rows: num(1, 12),
+  color: oneOf(WIDGET_COLORS),
+  opacity: num(20, 100),
+  url: str(2000),
+  title: str(60),
+  label: str(40),
+  customIcon: str(2_000_000),
+  iconStyle: oneOf(["original", "themed"]),
+  showTitle: BOOL,
 };
 
 export const BOOKMARKS_WIDGET_SCHEMA: Schema<BookmarksWidget> = {
@@ -898,6 +1142,8 @@ export const BOOKMARKS_WIDGET_SCHEMA: Schema<BookmarksWidget> = {
   x: num(0, 1, 0.0001),
   y: num(0, 1, 0.0001),
   size: num(80, 520),
+  cols: num(1, 12),
+  rows: num(1, 12),
   color: oneOf(WIDGET_COLORS),
   title: str(64),
   layout: oneOf(BOOKMARK_LAYOUTS),
@@ -912,7 +1158,7 @@ export const BOOKMARKS_WIDGET_SCHEMA: Schema<BookmarksWidget> = {
 
 export const HOME_LAYOUT_SCHEMA: Schema<HomeLayout> = {
   mode: oneOf(["free", "grid"]),
-  cell: num(8, 96, 4),
+  cell: num(8, 128, 4),
   showGrid: oneOf(["editing", "always", "never"]),
   guides: BOOL,
 };
@@ -969,6 +1215,9 @@ function sanitizeWidgets(raw: unknown): HomeWidget[] {
         widget = sanitize(legacy ? { ...item, face: legacy } : item, WEATHER_WIDGET_SCHEMA, DEFAULT_WEATHER_WIDGET);
       } else if (type === "custom_html") {
         widget = sanitize(item, CUSTOM_HTML_SCHEMA, DEFAULT_HTML_WIDGET);
+      } else if (type === "shortcut") {
+        const shortcut = sanitize(item, SHORTCUT_WIDGET_SCHEMA, DEFAULT_SHORTCUT_WIDGET);
+        widget = { ...shortcut, url: safeWebUrl(shortcut.url) || DEFAULT_SHORTCUT_WIDGET.url };
       } else if (type === "bookmarks") {
         widget = sanitize(item, BOOKMARKS_WIDGET_SCHEMA, DEFAULT_BOOKMARKS_WIDGET);
       } else {
@@ -1033,6 +1282,9 @@ function sanitizeLauncherLayout(raw: unknown): LauncherLayout {
       columns: typeof p.columns === "number" && Number.isFinite(p.columns) ? Math.min(12, Math.max(1, p.columns)) : d.columns,
       iconSize: typeof p.iconSize === "number" && Number.isFinite(p.iconSize) ? Math.min(96, Math.max(32, p.iconSize)) : d.iconSize,
       showAddButton: typeof p.showAddButton === "boolean" ? p.showAddButton : (d.showAddButton ?? false),
+      rows: typeof p.rows === "number" && Number.isFinite(p.rows) ? Math.min(3, Math.max(1, Math.round(p.rows))) : (d.rows ?? 2),
+      showLabels: typeof p.showLabels === "boolean" ? p.showLabels : (d.showLabels ?? true),
+      addTile: typeof p.addTile === "boolean" ? p.addTile : (d.addTile ?? true),
     };
   };
 
@@ -1056,6 +1308,8 @@ export function sanitizeSettings(value: unknown): Settings {
     launcherLayout: sanitizeLauncherLayout(raw.launcherLayout),
     appMenu: sanitizeAppMenu(raw.appMenu),
     faviconTheme: sanitizeFaviconTheme(raw.faviconTheme),
+    quickPills: sanitizeQuickPills(raw.quickPills),
+    news: sanitizeNews(raw.news),
   };
 }
 
@@ -1103,6 +1357,15 @@ export function sanitizeHistory(value: unknown): string[] {
 export function readHistory(): string[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return sanitizeHistory(value);
+  } catch {
+    return [];
+  }
+}
+
+export function readAiHistory(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(AI_HISTORY_KEY) || "[]");
     return sanitizeHistory(value);
   } catch {
     return [];

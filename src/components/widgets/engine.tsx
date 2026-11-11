@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { cn } from "../../utils/cn";
 
 /** Shared editing engine for everything on the home screen: widgets, logo, search bar and buttons. */
@@ -141,9 +141,38 @@ export function SelectionChrome({
 }
 
 /** Floating action pill above (or below) a selected element. */
-export function ElementToolbar({ below, title, children }: { below?: boolean; title?: string; children: ReactNode }) {
+export function ElementToolbar({
+  below,
+  title,
+  labels,
+  anchor,
+  children,
+}: {
+  below?: boolean;
+  title?: string;
+  /** Show text next to the icons (only when the element is wide enough). */
+  labels?: boolean;
+  /** Element box in stage px — used to nudge the toolbar back inside the screen near the edges. */
+  anchor?: { left: number; width: number; viewport: number };
+  children: ReactNode;
+}) {
+  // Rough toolbar width; enough to keep it from sliding off a screen edge.
+  let shift = 0;
+  if (anchor) {
+    const items = Array.isArray(children) ? children.filter(Boolean).length : 2;
+    const estimate = (labels ? 108 : 38) * items + (title ? 150 : 0) + 12;
+    const centre = anchor.left + anchor.width / 2;
+    const minCentre = estimate / 2 + 8;
+    const maxCentre = anchor.viewport - estimate / 2 - 8;
+    if (centre < minCentre) shift = minCentre - centre;
+    else if (centre > maxCentre) shift = maxCentre - centre;
+  }
   return (
-    <div className={cn("wl-toolbar", below && "wl-toolbar--below")} onPointerDown={(event) => event.stopPropagation()}>
+    <div
+      className={cn("wl-toolbar", below && "wl-toolbar--below", labels && "has-labels")}
+      style={shift ? ({ "--tb-shift": `${Math.round(shift)}px` } as CSSProperties) : undefined}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       {title && <span className="wl-toolbar-title">{title}</span>}
       {children}
     </div>

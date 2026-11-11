@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveFaviconTheme } from "./favicon-bridge";
 import { buildFaviconUserscript } from "./favicon-userscript";
 import { readBookmarks, readHistory, readSettings, type Settings } from "./settings";
 
@@ -64,12 +65,29 @@ export function backgroundScript(target: BrowserTarget): string {
     return tab && tab.id && tab.url && /^https?:/i.test(tab.url);
   }
 
-  // Send the favicon repaint request to every open tab — this is what repaints ALREADY OPEN tabs.
+  // Repaint every open tab — including tabs that were opened before the extension was installed.
+  // The content script is injected on demand first, because manifest content scripts only run on
+  // the next navigation of an already-open tab.
   function repaintFaviconsInAllTabs() {
-    chrome.tabs.query({}, function (tabs) {
-      (tabs || []).forEach(function (tab) {
-        if (!isHttpTab(tab)) return;
-        chrome.tabs.sendMessage(tab.id, { type: "lisyan:repaint-favicon" }).catch(function () {});
+    chrome.storage.local.get(THEME_KEY, function (data) {
+      var theme = data && data[THEME_KEY] ? data[THEME_KEY] : null;
+      chrome.tabs.query({}, function (tabs) {
+        (tabs || []).forEach(function (tab) {
+          if (!isHttpTab(tab)) return;
+          var inject = null;
+          try {
+            if (chrome.scripting && chrome.scripting.executeScript) {
+              inject = chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["favicon-theme.js"] });
+            } else if (typeof browser !== "undefined" && browser.tabs && browser.tabs.executeScript) {
+              inject = browser.tabs.executeScript(tab.id, { file: "favicon-theme.js", allFrames: true });
+            }
+          } catch (error) {}
+          var notify = function () {
+            chrome.tabs.sendMessage(tab.id, { type: "lisyan:repaint-favicon", lisyanTheme: theme }).catch(function () {});
+          };
+          if (inject && inject.then) inject.then(notify, notify);
+          else notify();
+        });
       });
     });
   }
@@ -77,6 +95,148 @@ export function backgroundScript(target: BrowserTarget): string {
   function allTabs() {
     return chrome.tabs.query({}).then(function (tabs) { return tabs || []; });
   }
+
+  var SITE_ICON_PREFIX = "lisyan_site_icon_v1:";
+  function siteHost(value) {
+    try { return new URL(value).hostname.toLowerCase().replace(/^www\\./, ""); } catch (e) { return ""; }
+  }
+  function cacheDaysFrom(data, requested) {
+    var theme = data && data[THEME_KEY];
+    var days = Number(requested || (theme && theme.cacheDays) || 5);
+    return Math.max(1, Math.min(30, isFinite(days) ? Math.round(days) : 5));
+  }
+  function trimSiteIconCache(days, callback) {
+    chrome.storage.local.get(null, function (all) {
+      var now = Date.now(), cutoff = now - days * 86400000, rows = [];
+      Object.keys(all || {}).forEach(function (key) {
+        if (key.indexOf(SITE_ICON_PREFIX) !== 0) return;
+        var entry = all[key];
+        if (!entry || !entry.dataUrl || Number(entry.lastSeenAt || entry.savedAt || 0) < cutoff) {
+          chrome.storage.local.remove(key);
+          return;
+        }
+        rows.push({ key: key, at: Number(entry.lastSeenAt || entry.savedAt || 0) });
+      });
+      rows.sort(function (a, b) { return b.at - a.at; });
+      rows.slice(600).forEach(function (row) { chrome.storage.local.remove(row.key); });
+      if (callback) callback();
+    });
+  }
+  function storeSiteIcon(pageUrl, iconUrl, requestedDays, callback) {
+    var host = siteHost(pageUrl);
+    if (!host || !/^https?:\\/\\//i.test(String(iconUrl || ""))) { if (callback) callback(null); return; }
+    chrome.storage.local.get([THEME_KEY, SITE_ICON_PREFIX + host], function (data) {
+      var days = cacheDaysFrom(data, requestedDays);
+      var key = SITE_ICON_PREFIX + host;
+      var old = data && data[key];
+      var now = Date.now();
+      if (old && old.dataUrl && now - Number(old.lastSeenAt || old.savedAt || 0) < days * 86400000 && old.iconUrl === iconUrl) {
+        old.lastSeenAt = now;
+        chrome.storage.local.set({ [key]: old }, function () { if (callback) callback(old); });
+        return;
+      }
+      fetch(String(iconUrl), { credentials: "omit", cache: "force-cache", redirect: "follow" })
+        .then(function (response) {
+          if (!response.ok) throw new Error(String(response.status));
+          var type = (response.headers.get("content-type") || "").split(";")[0].trim();
+          if (type && type.indexOf("image/") !== 0 && type !== "application/octet-stream") throw new Error("not-image");
+          return response.arrayBuffer().then(function (buffer) {
+            if (!buffer.byteLength || buffer.byteLength > 524288) throw new Error("icon-size");
+            var bytes = new Uint8Array(buffer), binary = "";
+            for (var i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+            if (!type || type === "application/octet-stream") type = /\\.svg(\\?|$)/i.test(iconUrl) ? "image/svg+xml" : /\\.ico(\\?|$)/i.test(iconUrl) ? "image/x-icon" : "image/png";
+            var entry = { host: host, iconUrl: String(iconUrl), dataUrl: "data:" + type + ";base64," + btoa(binary), savedAt: now, lastSeenAt: now };
+            var update = {}; update[key] = entry;
+            chrome.storage.local.set(update, function () { trimSiteIconCache(days, function () { if (callback) callback(entry); }); });
+          });
+        })
+        .catch(function () { if (callback) callback(old && old.dataUrl ? old : null); });
+    });
+  }
+
+  // Pages cannot read favicons from other origins (CORS), so the favicon content script asks here:
+  // the extension may fetch any http(s) address and hands the image back as a data: URL.
+  // The launcher also pings "apply-favicon-theme" after a palette change.
+  chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (!message) return;
+    if (message.type === "lisyan:apply-favicon-theme") {
+      repaintFaviconsInAllTabs();
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message.type === "lisyan:get-site-icon") {
+      var host = siteHost(String(message.url || ""));
+      if (!host) { sendResponse({}); return; }
+      var cacheKey = SITE_ICON_PREFIX + host;
+      chrome.storage.local.get([THEME_KEY, cacheKey], function (data) {
+        var days = cacheDaysFrom(data, message.cacheDays);
+        var icon = data && data[cacheKey];
+        if (!icon || !icon.dataUrl || Date.now() - Number(icon.lastSeenAt || icon.savedAt || 0) >= days * 86400000) {
+          chrome.storage.local.remove(cacheKey);
+          sendResponse({});
+          return;
+        }
+        icon.lastSeenAt = Date.now();
+        var update = {}; update[cacheKey] = icon;
+        chrome.storage.local.set(update, function () { sendResponse({ icon: icon }); });
+      });
+      return true;
+    }
+    if (message.type === "lisyan:cache-site-icon") {
+      var pageUrl = String(message.pageUrl || (sender && sender.tab && sender.tab.url) || "");
+      var pageHost = siteHost(pageUrl);
+      var senderHost = siteHost((sender && sender.tab && sender.tab.url) || (sender && sender.url) || "");
+      if (!pageHost || !senderHost || pageHost !== senderHost) { sendResponse({}); return; }
+      storeSiteIcon(pageUrl, String(message.iconUrl || ""), message.cacheDays, function (icon) { sendResponse({ ok: Boolean(icon) }); });
+      return true;
+    }
+    if (message.type === "lisyan:site-icon-count") {
+      chrome.storage.local.get(null, function (all) {
+        var now = Date.now(), days = cacheDaysFrom(all, null), cutoff = now - days * 86400000;
+        var keys = Object.keys(all || {}).filter(function (key) {
+          var item = all[key];
+          return key.indexOf(SITE_ICON_PREFIX) === 0 && item && item.dataUrl && Number(item.lastSeenAt || item.savedAt || 0) >= cutoff;
+        });
+        sendResponse({ count: keys.length });
+      });
+      return true;
+    }
+    if (message.type === "lisyan:clear-site-icons") {
+      chrome.storage.local.get(null, function (all) {
+        var keys = Object.keys(all || {}).filter(function (key) { return key.indexOf(SITE_ICON_PREFIX) === 0; });
+        chrome.storage.local.remove(keys, function () { sendResponse({ ok: true }); });
+      });
+      return true;
+    }
+    if (message.type !== "lisyan:fetch-icon") return;
+    var url = String(message.url || "");
+    if (!/^https?:\\/\\//i.test(url)) { sendResponse({}); return; }
+    fetch(url, { credentials: "omit", cache: "force-cache", redirect: "follow" })
+      .then(function (response) {
+        if (!response.ok) throw new Error(String(response.status));
+        var type = (response.headers.get("content-type") || "").split(";")[0].trim();
+        if (type && type.indexOf("image/") !== 0 && type !== "application/octet-stream") throw new Error("not an image");
+        return response.arrayBuffer().then(function (buffer) {
+          if (buffer.byteLength > 1048576) throw new Error("too large");
+          var bytes = new Uint8Array(buffer), binary = "";
+          for (var i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+          if (!type || type === "application/octet-stream") type = /\\.svg(\\?|$)/i.test(url) ? "image/svg+xml" : /\\.ico(\\?|$)/i.test(url) ? "image/x-icon" : "image/png";
+            var dataUrl = "data:" + type + ";base64," + btoa(binary);
+            var pageUrl = sender && sender.tab && sender.tab.url;
+            if (pageUrl && siteHost(pageUrl)) {
+              var key = SITE_ICON_PREFIX + siteHost(pageUrl);
+              chrome.storage.local.get([THEME_KEY], function (data) {
+                var entry = { host: siteHost(pageUrl), iconUrl: url, dataUrl: dataUrl, savedAt: Date.now(), lastSeenAt: Date.now() };
+                var update = {}; update[key] = entry;
+                chrome.storage.local.set(update, function () { trimSiteIconCache(cacheDaysFrom(data, null)); });
+              });
+            }
+            sendResponse({ dataUrl: dataUrl });
+        });
+      })
+      .catch(function () { sendResponse({}); });
+    return true; // the answer comes asynchronously
+  });
 `;
   if (target === "firefox") {
     return `// LisYan Marigold — background page (MV2). Generated at package time.
@@ -216,7 +376,8 @@ export async function buildExtensionFiles(settings: Settings, target: BrowserTar
           chrome_settings_overrides: { homepage: "index.html" },
           chrome_url_overrides: { newtab: "index.html" },
           icons: {},
-          permissions: ["storage", "tabs", "http://*/*", "https://*/*"],
+          // "clipboardWrite" lets the Share menu copy the link reliably from the new-tab page.
+          permissions: ["storage", "tabs", "history", "unlimitedStorage", "clipboardWrite", "http://*/*", "https://*/*"],
           background: { scripts: ["background.js"] },
           content_scripts: [
             {
@@ -239,11 +400,14 @@ export async function buildExtensionFiles(settings: Settings, target: BrowserTar
           version: APP_VERSION,
           description: "Material You search launcher with clock, weather and calendar widgets. Beta release “Marigold”.",
           chrome_url_overrides: { newtab: "index.html" },
+          // Lets the incognito pill open a genuinely private window; Chrome still asks the user to
+          // allow the extension in incognito before that works.
+          incognito: "spanning",
           icons: {},
           // "storage" keeps the launcher's settings; "scripting"+"tabs" power the built-in
           // mini-Tampermonkey (user scripts injected into matching tabs); <all_urls> is the
           // host access those scripts and the favicon repaint need.
-          permissions: ["storage", "scripting", "tabs"],
+          permissions: ["storage", "scripting", "tabs", "history", "unlimitedStorage", "clipboardWrite"],
           host_permissions: ["http://*/*", "https://*/*"],
           background: { service_worker: "background.js" },
           // Built-in favicon theming: runs on every http(s) page, no userscript needed.
@@ -271,7 +435,7 @@ export async function buildExtensionFiles(settings: Settings, target: BrowserTar
     { path: "lisyan-state.json", content: stateJson },
     // Registered as a content script in the manifest — favicons are repainted automatically
     // on every site, no Tampermonkey needed.
-    { path: "favicon-theme.js", content: buildFaviconUserscript(settings.faviconTheme) },
+    { path: "favicon-theme.js", content: buildFaviconUserscript(resolveFaviconTheme(settings.faviconTheme)) },
     { path: "background.js", content: backgroundScript(target) },
     ...(appSource ? [{ path: "app-source.txt", content: appSource }] : []),
     ...extraFiles,

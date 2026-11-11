@@ -66,7 +66,7 @@ function MiniMap({ selectedId, onSelect }: { selectedId: string | null; onSelect
       {k > 0 &&
         settings.widgets.map((widget) => {
           const rect = widgetRect(widget, viewport, layout);
-          const size = widgetSize(widget);
+          const size = widgetSize(widget, viewport, layout);
             const widgetName = widget.type === "custom_html" ? widget.title || "Custom Widget" : t(`wf.f.${widget.face}`);
             return (
               <button
@@ -127,6 +127,10 @@ export default function HomeSection() {
               }}
               onPickWeather={(face) => {
                 setSelectedId(actions.addWeather(face));
+                setAdding(false);
+              }}
+              onPickShortcut={(data) => {
+                setSelectedId(actions.addShortcut(data));
                 setAdding(false);
               }}
             />

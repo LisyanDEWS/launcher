@@ -93,7 +93,7 @@ export function Segmented<T extends string>({
   disabled?: boolean;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className={cn("flex flex-wrap gap-1", disabled && "opacity-50")}>
+    <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className={cn("flex flex-wrap gap-1.5 sm:gap-1", disabled && "opacity-50")}>
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -105,7 +105,7 @@ export function Segmented<T extends string>({
             disabled={disabled}
             onClick={() => onChange(option.value)}
             className={cn(
-              "h-8 rounded-full px-3 text-xs transition-all duration-300 disabled:cursor-not-allowed",
+              "min-h-9 rounded-full px-3.5 text-xs transition-all duration-300 disabled:cursor-not-allowed sm:h-8 sm:min-h-0 sm:px-3",
               selected
                 ? "rounded-[12px] bg-[var(--primary)] font-medium text-[var(--on-primary)]"
                 : "bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)]",
@@ -150,10 +150,16 @@ export function SliderRow({
 }) {
   const id = useId();
   return (
-    <div className={cn("flex items-center gap-3 px-4 py-2.5", disabled && "opacity-50")}>
-      <label htmlFor={id} className="w-24 shrink-0 truncate text-sm font-medium sm:w-32">
-        {label}
-      </label>
+    <div className={cn("flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-3 sm:py-2.5", disabled && "opacity-50")}>
+      <div className="flex items-center justify-between gap-2 sm:w-36 sm:shrink-0">
+        <label htmlFor={id} className="min-w-0 truncate text-sm font-medium">
+          {label}
+        </label>
+        <span className="shrink-0 text-end text-xs tabular-nums text-[var(--muted)] sm:hidden">
+          {value}
+          {unit}
+        </span>
+      </div>
       <input
         id={id}
         type="range"
@@ -165,7 +171,7 @@ export function SliderRow({
         onChange={(event) => onChange(Number(event.target.value))}
         className="range min-w-0 flex-1"
       />
-      <span className="w-14 shrink-0 text-end text-xs tabular-nums text-[var(--muted)]">
+      <span className="hidden w-14 shrink-0 text-end text-xs tabular-nums text-[var(--muted)] sm:inline">
         {value}
         {unit}
       </span>
@@ -232,10 +238,10 @@ export function SettingsGroup({
 }) {
   return (
     <section>
-      <div className="mb-2.5 flex items-end justify-between gap-4">
-        <div>
-          <h2 className="type-display text-lg font-semibold">{title}</h2>
-          {description && <p className="mt-0.5 max-w-2xl text-sm leading-5 text-[var(--muted)]">{description}</p>}
+      <div className="mb-2.5 flex flex-wrap items-end justify-between gap-2.5 sm:gap-4">
+        <div className="min-w-0 flex-1">
+          <h2 className="type-display text-base font-semibold sm:text-lg">{title}</h2>
+          {description && <p className="mt-0.5 max-w-2xl text-xs leading-relaxed text-[var(--muted)] sm:text-sm sm:leading-5">{description}</p>}
         </div>
         {action}
       </div>

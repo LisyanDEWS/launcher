@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { LanguageCode } from "../../i18n/languages";
 import type { RestorePayload } from "../../lib/backup";
 import type { MatrixSupport } from "../../lib/i18n";
-import type { Bookmark, FontTheme, SearchStyle, Settings, SettingsSection, TextAnim } from "../../lib/settings";
+import type { Bookmark, BookmarkShape, FontTheme, SearchStyle, Settings, SettingsSection, TextAnim } from "../../lib/settings";
 import type { WallpaperController } from "../../lib/wallpaper";
 
 export type AnalysisState = "idle" | "busy" | "error";
@@ -24,6 +24,10 @@ export type SettingsContextValue = {
   clearHistory: () => void;
   restoreBackup: (backup: RestorePayload) => Promise<void>;
   addBookmark: () => void;
+  /** Adds a bookmark without leaving settings. */
+  saveBookmark: (data: { title: string; url: string; customIcon?: string; shape?: BookmarkShape }) => void;
+  /** Replaces the bookmark order (shortcut row order). */
+  setBookmarkOrder: (next: Bookmark[]) => void;
   goTo: (section: SettingsSection) => void;
   toast: (text: string) => void;
   dark: boolean;

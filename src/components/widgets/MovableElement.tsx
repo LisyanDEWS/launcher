@@ -1,10 +1,10 @@
-import { Eye, EyeOff, LocateFixed } from "lucide-react";
+import { Settings2, Eye, EyeOff, LocateFixed } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { ARROW_DIRECTIONS, DRAG_THRESHOLD, ElementToolbar, GuideLines, LONG_PRESS, NO_GUIDES, SelectionChrome, growsLeft, growsUp, guideLines, magnet, resizeDelta, type Direction, type Guides } from "./engine";
 import { useI18n } from "../../lib/i18n";
 import { collectPeers, stageScale, toStageRect } from "../../lib/stage";
-import { snapWithin, useViewport, type Rect } from "../../lib/widgets";
+import { gridMetrics, snapToGrid, useViewport, type Rect } from "../../lib/widgets";
 import type { ElementPosition, HomeLayout } from "../../lib/settings";
 import { cn } from "../../utils/cn";
 
@@ -16,6 +16,8 @@ type Props = {
   editing: boolean;
   selected: boolean;
   onSelect: () => void;
+  /** Opens the properties panel on this element. */
+  onOpenSettings?: () => void;
   onMove: (x: number, y: number) => void;
   onResize: (width: number, scale: number) => void;
   onResetCenter: () => void;
@@ -47,6 +49,7 @@ export default function MovableElement({
   editing,
   selected,
   onSelect,
+  onOpenSettings,
   onMove,
   onResize,
   onResetCenter,
@@ -64,7 +67,7 @@ export default function MovableElement({
   const [guides, setGuides] = useState<Guides>(NO_GUIDES);
   const [flowHeight, setFlowHeight] = useState(0);
   const press = useRef<{ x: number; y: number; timer: number } | null>(null);
-  const grid = homeLayout.mode === "grid" || homeLayout.showGrid === "always";
+  const grid = homeLayout.mode === "grid";
 
   // Measure the in-flow height so the page doesn't collapse when the element lifts off during a drag.
   useLayoutEffect(() => {
@@ -89,9 +92,10 @@ export default function MovableElement({
   const spanY = Math.max(0, viewport.h - visualHeight);
   let left = position.x * spanX;
   let top = position.y * spanY;
+  const metrics = gridMetrics(viewport, homeLayout);
   if (grid && isCustom) {
-    left = snapWithin(left, homeLayout.cell, spanX);
-    top = snapWithin(top, homeLayout.cell, spanY);
+    left = snapToGrid(left, width, "x", metrics, viewport).value;
+    top = snapToGrid(top, visualHeight, "y", metrics, viewport).value;
   }
   const finalLeft = draft ? draft.left : Math.min(left, Math.max(EDGE, viewport.w - width - EDGE));
   const finalTop = draft ? draft.top : Math.max(EDGE, top);
@@ -107,7 +111,11 @@ export default function MovableElement({
     const maxY = Math.max(0, viewport.h - origin.height);
     const x = Math.min(Math.max(0, nextLeft), maxX);
     const y = Math.min(Math.max(0, nextTop), maxY);
-    if (grid) return { left: snapWithin(x, homeLayout.cell, maxX), top: snapWithin(y, homeLayout.cell, maxY), guides: NO_GUIDES };
+    if (grid) {
+      const sx = snapToGrid(x, origin.width, "x", metrics, viewport);
+      const sy = snapToGrid(y, origin.height, "y", metrics, viewport);
+      return { left: sx.value, top: sy.value, guides: { x: sx.centred ? [viewport.w / 2] : [], y: [] } };
+    }
     if (!homeLayout.guides) return { left: x, top: y, guides: NO_GUIDES };
     const lines = guideLines(viewport, peers);
     const sx = magnet(x, origin.width, lines.x, maxX);
@@ -160,6 +168,8 @@ export default function MovableElement({
     const { clientX: startX, clientY: startY, pointerId } = event;
     let moved = false;
     let latest: Draft | null = null;
+    /** Where a move will land (grid cell / magnet line); the element itself follows the finger freely. */
+    let landing: Draft | null = null;
 
     const move = (e: PointerEvent) => {
       if (e.pointerId !== pointerId) return;
@@ -173,7 +183,13 @@ export default function MovableElement({
 
       if (dir === "move") {
         const placed = place(origin, origin.left + dx, origin.top + dy, peers);
-        latest = { left: placed.left, top: placed.top, width: origWidth, scale: origScale };
+        landing = { left: placed.left, top: placed.top, width: origWidth, scale: origScale };
+        latest = {
+          left: Math.min(Math.max(0, origin.left + dx), Math.max(0, viewport.w - origin.width)),
+          top: Math.min(Math.max(0, origin.top + dy), Math.max(0, viewport.h - origin.height)),
+          width: origWidth,
+          scale: origScale,
+        };
         setGuides(placed.guides);
       } else if (dir === "e" || dir === "w") {
         // Side pills change the width (great for the search bar); everything else scales proportionally.
@@ -211,7 +227,8 @@ export default function MovableElement({
       setGuides(NO_GUIDES);
       if (!moved) return;
       onDragState?.(false);
-      if (latest) commit(latest, dir);
+      // On release the element springs from where it was dropped into its snapped place.
+      if (latest) commit(dir === "move" && landing ? landing : latest, dir);
     };
 
     window.addEventListener("pointermove", move);
@@ -269,7 +286,16 @@ export default function MovableElement({
   }
 
   const style: CSSProperties = lifted
-    ? { position: "fixed", left: finalLeft, top: finalTop, width, maxWidth: `calc(100vw - ${EDGE * 2}px)`, zIndex: editing ? (selected ? 48 : 46) : 20 }
+    ? {
+        position: "fixed",
+        left: finalLeft,
+        top: finalTop,
+        width,
+        maxWidth: `calc(100vw - ${EDGE * 2}px)`,
+        zIndex: editing ? (selected ? 48 : 46) : 20,
+        // Exactly under the finger while dragging; a springy settle (with overshoot) once released.
+        transition: draft ? "none" : "left 420ms var(--ui-spring), top 420ms var(--ui-spring), width 320ms var(--ui-spring), outline-color 150ms ease",
+      }
     : { position: "relative", marginTop: 0, marginRight: "auto", marginBottom: 0, marginLeft: "auto", width, maxWidth: `calc(100vw - ${EDGE * 2}px)`, zIndex: editing ? (selected ? 48 : 46) : "auto" };
 
   const toolbarBelow = (lifted ? finalTop : box.current ? toStageRect(box.current.getBoundingClientRect()).top : 100) < 72;
@@ -306,6 +332,11 @@ export default function MovableElement({
       >
         {editing && selected && !draft && (
           <ElementToolbar below={toolbarBelow} title={title}>
+            {onOpenSettings && (
+              <button type="button" onClick={onOpenSettings} title={t("settings.title")} aria-label={t("settings.title")}>
+                <Settings2 size={16} aria-hidden="true" />
+              </button>
+            )}
             {isCustom && (
               <button type="button" onClick={onResetCenter} title={t("home.element.center")} aria-label={t("home.element.center")}>
                 <LocateFixed size={16} aria-hidden="true" />
