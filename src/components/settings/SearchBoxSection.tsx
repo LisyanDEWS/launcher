@@ -1,4 +1,6 @@
 import { RotateCcw } from "lucide-react";
+import { QuickPillsSection } from "./LauncherSections";
+import ShortcutsSection from "./ShortcutsSection";
 import LivePreview from "./LivePreview";
 import { useSettingsCtx } from "./context";
 import SearchBox from "../SearchBox";
@@ -82,6 +84,8 @@ export default function SearchBoxSection() {
           })}
         </div>
       </SettingsGroup>
+
+      <ShortcutsSection />
 
       <SettingsGroup title={t("sb.shape")}>
         <div className={card}>
@@ -279,6 +283,7 @@ export default function SearchBoxSection() {
           {t("common.reset")}
         </button>
       </div>
+      <QuickPillsSection />
     </div>
   );
 }

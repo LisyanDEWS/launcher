@@ -94,10 +94,10 @@ export default function ContextMenu({
   return (
     <div
       ref={ref}
-      style={{ left: `${clampedX}px`, top: `${clampedY}px` }}
+      style={{ left: `${clampedX}px`, top: `${clampedY}px`, transformOrigin: `${Math.round(menu.x - clampedX)}px ${Math.round(menu.y - clampedY)}px` }}
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
-      className="fixed z-[120] min-w-[210px] rounded-2xl border border-[var(--line)] bg-[var(--surface)]/95 p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.32)] backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150 ease-[var(--ui-ease,cubic-bezier(0.16,1,0.3,1))]"
+      className="ctx-jelly fixed z-[120] min-w-[210px] rounded-2xl border border-[var(--line)] bg-[var(--surface)]/95 p-1.5 shadow-[0_16px_48px_rgba(0,0,0,0.32)] backdrop-blur-2xl"
     >
       {/* Widget Target Context Menu */}
       {menu.type === "widget" && menu.targetId && (

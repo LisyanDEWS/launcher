@@ -43,7 +43,7 @@ export default function LivePreview() {
 
   return (
     <div className="z-20 -mx-1 bg-[var(--bg)] px-1 pb-3 md:sticky md:top-0">
-      <div className="relative isolate overflow-hidden rounded-[28px] border border-[var(--line)] bg-[var(--bg)] px-4 py-10 sm:px-8 sm:py-12">
+      <div className="relative isolate overflow-hidden rounded-[24px] border border-[var(--line)] bg-[var(--bg)] px-3 py-6 sm:rounded-[28px] sm:px-8 sm:py-12">
         {url && (
           <WallpaperLayer
             key={url}

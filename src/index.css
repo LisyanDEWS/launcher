@@ -628,9 +628,19 @@ body {
 /* The face box is the size container, so cq units inside a face are relative to it. */
 .wf-face {
   position: relative;
+  display: flex;
   width: 100%;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The fitted face box is the size container, so cq units inside a face follow the face, not the cell. */
+.wf-fit {
+  position: relative;
+  flex-shrink: 0;
   container-type: size;
+  transition: width 260ms var(--ui-spring), height 260ms var(--ui-spring);
 }
 
 .wf-svg {
@@ -942,7 +952,6 @@ body {
 .wl-item.is-dragging {
   z-index: 2;
   cursor: grabbing;
-  scale: 1.02;
   filter: drop-shadow(0 18px 30px rgb(0 0 0 / 0.28));
   transition: scale 160ms var(--ui-ease), filter 160ms ease;
 }
@@ -953,20 +962,57 @@ body {
 }
 
 /* Grid mode: a short glide when the widget jumps to the next cell. */
+.wl-item,
 .wl--grid .wl-item {
   transition:
-    transform 110ms var(--ui-ease),
+    transform 320ms var(--ui-spring),
+    width 320ms var(--ui-spring),
+    height 320ms var(--ui-spring),
     outline-color 150ms ease;
 }
+/* Resizing springs too: the face grows into its new cells with a slight overshoot. */
+.wl-item .wf,
+.wl-item .wf-face {
+  transition: width 320ms var(--ui-spring), height 320ms var(--ui-spring);
+}
+/* While dragged (and while landing) the spring loop owns the transform. */
+.wl-item.is-jelly {
+  transition: outline-color 150ms ease !important;
+  will-change: transform;
+}
+.wl-landing {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 2px dashed color-mix(in srgb, var(--primary) 70%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  pointer-events: none;
+  transition: transform 260ms var(--ui-spring);
+  animation: fade-in 160ms ease both;
+}
+.wl-landing[data-shape="round"] { border-radius: 50%; }
 
 .wl-grid {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
   pointer-events: none;
-  background-image: radial-gradient(circle, color-mix(in srgb, var(--fg) 26%, transparent) 1.2px, transparent 1.7px);
-  background-size: var(--cell) var(--cell);
-  background-position: calc(var(--cell) / -2) calc(var(--cell) / -2);
   animation: fade-in 320ms ease both;
+}
+/* Cells of the centred launcher grid — the same cells widgets snap to. */
+.wl-grid-cell {
+  fill: color-mix(in srgb, var(--fg) 5%, transparent);
+  stroke: color-mix(in srgb, var(--fg) 16%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+.wl-grid-axis {
+  stroke: color-mix(in srgb, var(--primary) 45%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 2 6;
 }
 
 .wl-guide {
@@ -1053,19 +1099,23 @@ body {
   align-items: center;
   gap: 2px;
   padding: 4px;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% + var(--tb-shift, 0px)));
+  transform-origin: 50% 100%;
   border-radius: 999px;
   background: var(--surface);
   box-shadow: 0 10px 28px rgb(0 0 0 / 0.26);
   cursor: default;
-  animation: wl-toolbar-in 380ms var(--ui-spring) both;
+  white-space: nowrap;
+  /* "backwards": after the jelly settles, :active/:hover transforms work normally again. */
+  animation: wl-toolbar-jelly 640ms cubic-bezier(0.2, 0.9, 0.2, 1) backwards;
   pointer-events: auto;
 }
 
 .wl-toolbar--below {
   top: auto;
   bottom: -52px;
-  animation-name: wl-toolbar-in-below;
+  transform-origin: 50% 0%;
+  animation-name: wl-toolbar-jelly-below;
 }
 
 .wl-toolbar-title {
@@ -4563,4 +4613,429 @@ body {
   .bbar-menu {
     min-width: 200px;
   }
+}
+
+/* ---------- Quick pills: halves of the search bar, drawn with its own variables ---------- */
+.quick-pills {
+  display: grid;
+  grid-template-columns: repeat(var(--pill-cols, 2), minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+.quick-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  height: var(--pill-h);
+  padding-inline: 14px;
+  border-radius: var(--sb-r);
+  border-style: solid;
+  border-width: var(--sb-bw);
+  border-color: var(--sb-bc);
+  background: var(--sb-bg);
+  color: var(--fg);
+  box-shadow: var(--sb-shadow);
+  -webkit-backdrop-filter: var(--sb-backdrop);
+  backdrop-filter: var(--sb-backdrop);
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    border-radius 450ms var(--ease-spatial),
+    transform 350ms var(--ease-spatial),
+    background-color 250ms ease,
+    color 250ms ease,
+    box-shadow 250ms ease;
+}
+.quick-pill:hover { border-radius: var(--sb-rf); background: var(--sb-bg-focus); border-color: var(--sb-bc-focus); box-shadow: var(--sb-shadow-focus); }
+.quick-pill:active { transform: scale(0.97); }
+.quick-pill:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent); }
+.quick-pill-ico { display: inline-flex; color: var(--primary); }
+.quick-pill--ai .quick-pill-ico { color: var(--tertiary); }
+.quick-pill.is-on { background: var(--tertiary-container); color: var(--on-tertiary-container); border-color: transparent; }
+.quick-pill.is-on .quick-pill-ico { color: inherit; }
+.quick-pill-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--tertiary); box-shadow: 0 0 8px var(--tertiary); }
+.quick-pill--icon { padding-inline: 0; }
+
+/* ---------- News band: always below the full-height widget stage ---------- */
+.news-band {
+  /* The same wallpaper as the launcher, one step more blurred — the band is a frosted sheet over it. */
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--primary) 55%, transparent), transparent) top / 100% 2px no-repeat,
+    color-mix(in srgb, var(--bg) 58%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  backdrop-filter: blur(28px) saturate(1.5);
+}
+.home-stage.is-staged ~ .news-band { display: none; }
+.news-skeleton { position: relative; overflow: hidden; }
+.news-skeleton::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--primary) 10%, transparent) 50%, transparent 70%); background-size: 220% 100%; animation: news-shimmer 1.6s var(--ease-spatial) infinite; }
+@keyframes news-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+
+/* Photo tone: repaint article images in the palette so the feed matches the theme. */
+.news-tile { background: linear-gradient(140deg, color-mix(in srgb, var(--news-accent, var(--primary)) 30%, var(--surface-container-high)), color-mix(in srgb, var(--news-accent, var(--primary)) 10%, var(--surface-container-highest))); }
+.news-cover--mono .news-photo { filter: grayscale(1) contrast(1.05); }
+.news-cover--mono::before { content: ""; position: absolute; inset: 0; z-index: 1; background: var(--primary); mix-blend-mode: color; opacity: 0.85; pointer-events: none; }
+.news-cover--duotone .news-photo { filter: grayscale(1) contrast(1.1) brightness(0.95); }
+.news-cover--duotone::before { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(135deg, var(--primary), var(--tertiary)); mix-blend-mode: screen; opacity: 0.55; pointer-events: none; }
+.news-cover--duotone::after { content: ""; position: absolute; inset: 0; z-index: 1; background: var(--primary-container); mix-blend-mode: multiply; opacity: 0.6; pointer-events: none; }
+.news-cover > span { z-index: 2; }
+
+/* ---------- Magnetic sheet: the news reads as a separate page that docks under the launcher ---------- */
+.news-band {
+  border-radius: 40px 40px 0 0;
+  box-shadow: 0 -14px 44px -18px rgba(0, 0, 0, 0.22);
+  position: relative;
+}
+.news-band::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  transition: width 400ms var(--ease-spatial), background-color 300ms ease;
+}
+/* The sheet is always visible: the reveal is a one-shot animation, never a JS-gated opacity,
+   so leaving settings can no longer leave the band blank. */
+.news-band .news-feed { animation: news-feed-in 700ms var(--ease-spatial) both; }
+@keyframes news-feed-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .news-band .news-feed { animation: none; }
+}
+
+/* Google Discover Masonry Stream: each card has natural height, no breaking across columns */
+.news-card {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+}
+@keyframes news-note-in { from { opacity: 0; transform: translateY(4px) scale(0.96); } to { opacity: 1; transform: none; } }
+
+/* Handle at the bottom of the launcher: a quiet sheet grip, the visible way "into" the news page. */
+.news-handle {
+  position: fixed;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 40px;
+  padding: 0 18px 0 7px;
+  border: 1px solid color-mix(in srgb, var(--outline) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.35), 0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset;
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  transition:
+    opacity 320ms var(--ui-ease),
+    transform 450ms var(--ease-spatial),
+    border-radius 400ms var(--ease-spatial),
+    background-color 250ms ease,
+    box-shadow 250ms ease;
+  animation: news-handle-in 620ms var(--ease-spatial);
+}
+.news-handle.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 14px) scale(0.94);
+  visibility: hidden;
+}
+.news-handle-grip {
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 26%, transparent);
+  order: -1;
+}
+.news-handle-ico {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  transition: background-color 250ms ease, color 250ms ease, transform 400ms var(--ease-spatial);
+}
+.news-handle:hover {
+  transform: translateX(-50%) translateY(-3px);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--surface-container-high) 94%, transparent);
+  box-shadow: 0 16px 38px -14px rgb(0 0 0 / 0.4);
+}
+.news-handle:hover .news-handle-ico { background: var(--primary); color: var(--on-primary); transform: translateY(1px); }
+.news-handle:active { transform: translateX(-50%) translateY(-1px) scale(0.98); }
+.news-handle-text { padding-inline-end: 1px; }
+@keyframes news-handle-in { from { opacity: 0; transform: translate(-50%, 16px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) {
+  .news-handle { animation: none; }
+  .news-handle, .news-handle-ico { transition: opacity 160ms linear; }
+}
+@media (max-width: 640px) {
+  .news-handle { bottom: max(14px, env(safe-area-inset-bottom, 0px)); height: 38px; padding-inline: 6px 14px; }
+  .news-handle-grip { display: none; }
+  .news-handle-ico { width: 26px; height: 26px; }
+}
+
+/* The edit button fades out instead of disappearing abruptly when the feed takes over. */
+.edit-home-button { animation: edit-button-in 500ms var(--ease-spatial) both; }
+@keyframes edit-button-in { from { opacity: 0; transform: translateY(8px) scale(0.96); } to { opacity: 1; transform: none; } }
+
+/* Cards drift in with a short stagger — reads as pages of a digest, not one long list. */
+.news-card, .news-fill { animation: news-card-in 560ms var(--ease-spatial) both; }
+.news-card:nth-child(4n + 2) { animation-delay: 40ms; }
+.news-card:nth-child(4n + 3) { animation-delay: 80ms; }
+.news-card:nth-child(4n + 4) { animation-delay: 120ms; }
+@keyframes news-card-in { from { opacity: 0; transform: translateY(18px) scale(0.985); } to { opacity: 1; transform: none; } }
+.news-sentinel { animation: news-sentinel-in 400ms ease both; }
+@keyframes news-sentinel-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .news-card, .news-fill, .edit-home-button, .news-sentinel { animation: none; }
+}
+
+/* ---------- Top Search Overlay (Omnibox view when pressing the search bar) ---------- */
+.search-overlay {
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  -webkit-backdrop-filter: blur(26px) saturate(1.4);
+  backdrop-filter: blur(26px) saturate(1.4);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: search-overlay-bg-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.search-overlay.is-closing {
+  animation: search-overlay-bg-out 240ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.search-overlay-bar {
+  animation: search-bar-glide-up 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+.search-overlay.is-closing .search-overlay-bar {
+  animation: search-bar-glide-down 240ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.search-overlay-item {
+  animation: search-item-rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+.search-overlay-item--1 { animation-delay: 45ms; }
+.search-overlay-item--2 { animation-delay: 85ms; }
+.search-overlay-item--3 { animation-delay: 120ms; }
+.search-overlay.is-closing .search-overlay-item {
+  animation: search-item-exit 180ms ease both;
+}
+
+@keyframes search-overlay-bg-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes search-overlay-bg-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes search-bar-glide-up {
+  from {
+    opacity: 0.7;
+    transform: translate3d(0, var(--search-from-y, 140px), 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+@keyframes search-bar-glide-down {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0, calc(var(--search-from-y, 120px) * 0.65), 0) scale(0.96);
+  }
+}
+@keyframes search-item-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+@keyframes search-item-exit {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to { opacity: 0; transform: translate3d(0, 8px, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-overlay,
+  .search-overlay-bar,
+  .search-overlay-item {
+    animation: none !important;
+  }
+}
+
+/* ---------- Share menu (search overlay) ---------- */
+.share-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  inset-inline-end: -4px;
+  z-index: 60;
+  display: flex;
+  width: min(250px, calc(100vw - 32px));
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 20px;
+  background: var(--surface-container-highest);
+  box-shadow: 0 16px 42px rgb(0 0 0 / 0.34), inset 0 0 0 1px var(--line);
+  transform-origin: top right;
+  animation: fg-in 260ms var(--ui-spring) both;
+}
+.share-menu-link {
+  display: flex;
+  margin: 2px 2px 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--surface-container);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.share-menu button {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: start;
+  transition: background-color 140ms ease, border-radius 240ms var(--ui-ease);
+}
+.share-menu button:hover { border-radius: 8px; background: var(--surface-container-high); }
+.share-menu button svg { color: var(--primary); flex-shrink: 0; }
+
+/* ---------- Shortcut widget: one round site icon ---------- */
+.sc {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--w-container);
+  color: var(--w-on-container);
+  text-decoration: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--w-on-container) 8%, transparent);
+  transition: transform 340ms var(--ui-spring), border-radius 420ms var(--ui-ease), background-color 200ms ease;
+  -webkit-user-drag: none;
+}
+a.sc:hover { transform: scale(1.06); border-radius: 32%; }
+a.sc:active { transform: scale(0.93); }
+.sc--original { background: var(--surface-container-high); }
+.sc--custom { background: var(--surface-container-high); }
+.sc-img { width: 54%; height: 54%; object-fit: contain; border-radius: 18%; pointer-events: none; }
+.sc-img--full { width: 100%; height: 100%; object-fit: cover; border-radius: 0; }
+.sc-letter { font-family: var(--font-display); font-size: 44cqmin; font-weight: 700; line-height: 1; color: var(--w-accent); }
+.sc-themed {
+  --ap-logo-ink: var(--w-accent);
+  --ap-logo-paper: var(--w-on-accent);
+  display: grid;
+  width: 58%;
+  height: 58%;
+  place-items: center;
+  color: var(--w-accent);
+  pointer-events: none;
+}
+.sc-themed .ap-product-art { display: block; width: 100%; height: 100%; }
+.sc-themed .ap-letter { font-family: var(--font-display); font-size: 44cqmin; font-weight: 700; line-height: 1; }
+.wf--shortcut .wf-caption { text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+
+/* ---------- Shortcuts under the search bar ---------- */
+.sr-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-inline: auto;
+}
+.sr-tile { flex: none; min-width: 0; animation: sr-in 420ms var(--ui-spring) both; }
+@keyframes sr-in { from { opacity: 0; transform: translateY(8px) scale(0.86); } }
+@media (prefers-reduced-motion: reduce) { .sr-tile { animation: none; } }
+
+/* ---------- Jelly menus ---------- */
+@keyframes wl-toolbar-jelly {
+  0% { opacity: 0; transform: translateX(calc(-50% + var(--tb-shift, 0px))) translateY(12px) scale(0.5, 0.3); }
+  36% { opacity: 1; transform: translateX(calc(-50% + var(--tb-shift, 0px))) translateY(-3px) scale(1.12, 0.88); }
+  56% { transform: translateX(calc(-50% + var(--tb-shift, 0px))) translateY(1px) scale(0.93, 1.08); }
+  74% { transform: translateX(calc(-50% + var(--tb-shift, 0px))) scale(1.04, 0.97); }
+  89% { transform: translateX(calc(-50% + var(--tb-shift, 0px))) scale(0.99, 1.01); }
+  100% { opacity: 1; transform: translateX(calc(-50% + var(--tb-shift, 0px))) scale(1); }
+}
+@keyframes wl-toolbar-jelly-below {
+  0% { opacity: 0; transform: translateX(calc(-50% + var(--tb-shift, 0px))) translateY(-12px) scale(0.5, 0.3); }
+  36% { opacity: 1; transform: translateX(calc(-50% + var(--tb-shift, 0px))) translateY(3px) scale(1.12, 0.88); }
+  56% { transform: translateX(calc(-50% + var(--tb-shift, 0px))) translateY(-1px) scale(0.93, 1.08); }
+  74% { transform: translateX(calc(-50% + var(--tb-shift, 0px))) scale(1.04, 0.97); }
+  89% { transform: translateX(calc(-50% + var(--tb-shift, 0px))) scale(0.99, 1.01); }
+  100% { opacity: 1; transform: translateX(calc(-50% + var(--tb-shift, 0px))) scale(1); }
+}
+/* Each button pops in a beat after the pill, one after another. */
+.wl-toolbar > button { animation: wl-tool-pop 560ms cubic-bezier(0.2, 0.9, 0.2, 1) backwards; }
+.wl-toolbar > button:nth-of-type(1) { animation-delay: 80ms; }
+.wl-toolbar > button:nth-of-type(2) { animation-delay: 135ms; }
+.wl-toolbar > button:nth-of-type(3) { animation-delay: 190ms; }
+.wl-toolbar > button:nth-of-type(4) { animation-delay: 245ms; }
+@keyframes wl-tool-pop {
+  0% { opacity: 0; transform: scale(0.2) rotate(-14deg); }
+  55% { opacity: 1; transform: scale(1.18) rotate(5deg); }
+  78% { transform: scale(0.94) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.wl-tb-label { display: none; }
+.wl-toolbar.has-labels > button { width: auto; gap: 6px; padding: 0 12px 0 10px; font-size: 12.5px; font-weight: 600; }
+.wl-toolbar.has-labels .wl-tb-label { display: inline; }
+.wl-tb-sep { width: 1px; height: 20px; margin: 0 3px; background: var(--line); flex: none; }
+.wl-toolbar > button.is-danger { color: #e5484d; }
+.wl-toolbar > button.is-danger:hover { background: color-mix(in srgb, #e5484d 16%, transparent); }
+
+/* Right-click menu grows out of the clicked point with a soft wobble. */
+.ctx-jelly { animation: ctx-jelly 560ms cubic-bezier(0.2, 0.9, 0.2, 1) backwards; }
+@keyframes ctx-jelly {
+  0% { opacity: 0; transform: scale(0.4, 0.25); }
+  38% { opacity: 1; transform: scale(1.06, 0.94); }
+  60% { transform: scale(0.97, 1.04); }
+  80% { transform: scale(1.012, 0.994); }
+  100% { opacity: 1; transform: none; }
+}
+.ctx-jelly button { animation: ctx-item 420ms var(--ui-ease) backwards; }
+.ctx-jelly button:nth-of-type(1) { animation-delay: 60ms; }
+.ctx-jelly button:nth-of-type(2) { animation-delay: 95ms; }
+.ctx-jelly button:nth-of-type(3) { animation-delay: 130ms; }
+.ctx-jelly button:nth-of-type(4) { animation-delay: 165ms; }
+.ctx-jelly button:nth-of-type(5) { animation-delay: 200ms; }
+@keyframes ctx-item { from { opacity: 0; transform: translateX(-6px); } }
+
+/* The 9-dot app menu opens the same way. */
+.ap-drawer { animation: ap-jelly 600ms cubic-bezier(0.2, 0.9, 0.2, 1) both; }
+@keyframes ap-jelly {
+  0% { opacity: 0; transform: scale(0.55, 0.35); }
+  40% { opacity: 1; transform: scale(1.04, 0.96); }
+  62% { transform: scale(0.985, 1.02); }
+  82% { transform: scale(1.006, 0.996); }
+  100% { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wl-toolbar, .wl-toolbar > button, .ctx-jelly, .ctx-jelly button, .ap-drawer { animation-duration: 1ms !important; }
 }

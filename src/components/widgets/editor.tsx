@@ -1,4 +1,4 @@
-import { ChevronDown, Code2, Copy, EyeOff, LayoutGrid, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, Code2, Copy, EyeOff, LayoutGrid, Minus, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { FaceGallery } from "./FaceGallery";
 import { FaceThumb } from "./FaceThumb";
@@ -11,10 +11,11 @@ import { useI18n } from "../../lib/i18n";
 import {
   BOOKMARK_LAYOUTS,
   BOOKMARK_LAYOUT_LABELS,
-  HOME_LAYOUT_SCHEMA,
   HOUR_CYCLES,
   WIDGET_COLORS,
-  limits,
+  getHost,
+  readBookmarks,
+  safeWebUrl,
   type BarSlot,
   type BarSlotKind,
   type BookmarksLayout,
@@ -24,8 +25,89 @@ import {
   type SecondsMode,
   type SearchStyle,
 } from "../../lib/settings";
-import { SIZE_MAX, SIZE_MIN, captionText } from "../../lib/widgets";
+import { SHAPE_SPANS, captionText, gridMetrics, readViewport, widgetShape, widgetSpan, type WidgetShape } from "../../lib/widgets";
 import { cn } from "../../utils/cn";
+
+
+const SHAPE_LABELS: Record<WidgetShape, [string, string]> = {
+  round: ["Round", "Круглый"],
+  rect: ["Rectangle", "Прямоугольник"],
+  square: ["Square", "Квадрат"],
+  wide: ["Large", "Большой"],
+};
+
+/** A − value + stepper for one grid axis. */
+function Stepper({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+      <span className="text-sm font-medium">{label}</span>
+      <div className="flex items-center gap-1 rounded-full bg-[var(--surface-container-high)] p-1">
+        <button type="button" onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min} aria-label={`${label} −`} className="grid h-8 w-8 place-items-center rounded-full transition hover:bg-[var(--surface-container-highest)] disabled:opacity-30">
+          <Minus size={15} aria-hidden="true" />
+        </button>
+        <span className="min-w-[3.2ch] text-center text-sm font-semibold tabular-nums" aria-live="polite">
+          {value}
+        </span>
+        <button type="button" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max} aria-label={`${label} +`} className="grid h-8 w-8 place-items-center rounded-full transition hover:bg-[var(--surface-container-highest)] disabled:opacity-30">
+          <Plus size={15} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Size in grid cells. Presets give the standard shapes (rectangles are all the same size, a square is
+ * two rectangles stacked, a large card is two squares wide); width and height then stretch independently.
+ * Round widgets only scale as a whole.
+ */
+function SizeControls({ widget, onChange }: { widget: HomeWidget; onChange: (patch: Partial<HomeWidget>) => void }) {
+  const { lang } = useI18n();
+  const ru = lang.startsWith("ru");
+  const m = gridMetrics(readViewport());
+  const shape = widgetShape(widget);
+  const span = widgetSpan(widget, m);
+  const maxCols = m.cols;
+  const maxRows = Math.max(1, m.rows);
+  if (shape === "round") {
+    const limit = Math.min(maxCols, maxRows, 6);
+    return (
+      <>
+        <FieldRow label={ru ? "Размер" : "Size"} hint={ru ? "Круглые виджеты растут целиком: 1 клетка — половина прямоугольника." : "Round widgets scale as a whole: 1 cell is half a rectangle."}>
+          <Segmented
+            label={ru ? "Размер" : "Size"}
+            value={String(span.cols)}
+            onChange={(value) => onChange({ cols: Number(value), rows: Number(value) })}
+            options={Array.from({ length: limit }, (_, i) => ({ value: String(i + 1), label: `${i + 1}×${i + 1}` }))}
+          />
+        </FieldRow>
+      </>
+    );
+  }
+  const presets: WidgetShape[] = ["rect", "square", "wide"];
+  const activePreset = presets.find((p) => SHAPE_SPANS[p].cols === span.cols && SHAPE_SPANS[p].rows === span.rows);
+  return (
+    <>
+      <FieldRow label={ru ? "Форма" : "Shape"} hint={ru ? "Прямоугольник 2×1, квадрат 2×2 (два прямоугольника), большой 4×2." : "Rectangle 2×1, square 2×2 (two rectangles), large 4×2."}>
+        <Segmented
+          label={ru ? "Форма" : "Shape"}
+          value={activePreset ?? "custom"}
+          onChange={(value) => {
+            if (value === "custom") return;
+            const preset = SHAPE_SPANS[value as WidgetShape];
+            onChange({ cols: Math.min(maxCols, preset.cols), rows: Math.min(maxRows, preset.rows) });
+          }}
+          options={[
+            ...presets.map((p) => ({ value: p, label: `${SHAPE_LABELS[p][ru ? 1 : 0]} ${SHAPE_SPANS[p].cols}×${SHAPE_SPANS[p].rows}` })),
+            ...(activePreset ? [] : [{ value: "custom", label: `${ru ? "Своя" : "Custom"} ${span.cols}×${span.rows}` }]),
+          ]}
+        />
+      </FieldRow>
+      <Stepper label={ru ? "Ширина, клеток" : "Width, cells"} value={span.cols} min={1} max={maxCols} onChange={(cols) => onChange({ cols, rows: span.rows })} />
+      <Stepper label={ru ? "Высота, клеток" : "Height, cells"} value={span.rows} min={1} max={maxRows} onChange={(rows) => onChange({ rows, cols: span.cols })} />
+    </>
+  );
+}
 
 const CITY_PRESETS = [
   "Moscow",
@@ -79,7 +161,7 @@ export function WidgetEditor({ widget, onChange, onDuplicate, onRemove, canDupli
         </div>
 
         <div className={card}>
-          <SliderRow label={t("wg.size")} value={widget.size} min={SIZE_MIN} max={SIZE_MAX} step={4} unit=" px" onChange={(size) => onChange({ size })} />
+          <SizeControls widget={widget} onChange={onChange} />
           <FieldRow label={t("wg.color")}>
             <Segmented label={t("wg.color")} value={widget.color} onChange={(color) => onChange({ color })} options={WIDGET_COLORS.map((value) => ({ value, label: t(`wg.c.${value}`) }))} />
           </FieldRow>
@@ -93,6 +175,92 @@ export function WidgetEditor({ widget, onChange, onDuplicate, onRemove, canDupli
               className={cn(INPUT, "h-11")}
             />
           </FieldRow>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={onDuplicate} disabled={!canDuplicate} className={BUTTON}>
+            <Copy size={16} aria-hidden="true" />
+            {t("wg.duplicate")}
+          </button>
+          <button type="button" onClick={onRemove} className={BUTTON}>
+            <Trash2 size={16} aria-hidden="true" />
+            {t("wg.remove")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Single round shortcut ("Вкладка")
+  if (widget.type === "shortcut") {
+    const saved = readBookmarks().slice(0, 12);
+    const host = getHost(safeWebUrl(widget.url));
+    return (
+      <div className="space-y-4">
+        <div className={CARD}>
+          <div className="flex items-center gap-4 p-4">
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[var(--surface-container-high)]" aria-hidden="true">
+              <FaceThumb widget={{ ...widget, showTitle: false }} maxWidth={52} maxHeight={52} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs text-[var(--muted)]">{t("wf.f.shortcut")}</div>
+              <div className="truncate font-semibold">{widget.title || host}</div>
+              <div className="truncate text-xs text-[var(--muted)]">{host || (isRu ? "неверный адрес" : "invalid address")}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className={card}>
+          <FieldRow label={isRu ? "Адрес сайта" : "Website address"}>
+            <input
+              value={widget.url}
+              maxLength={2000}
+              inputMode="url"
+              onChange={(event) => onChange({ url: event.target.value })}
+              placeholder="https://example.com"
+              className={cn(INPUT, "h-11", widget.url && !safeWebUrl(widget.url) && "ring-2 ring-[var(--error,#b3261e)]")}
+            />
+          </FieldRow>
+          <FieldRow label={isRu ? "Название" : "Name"}>
+            <input value={widget.title} maxLength={60} onChange={(event) => onChange({ title: event.target.value })} placeholder={host || "Google"} className={cn(INPUT, "h-11")} />
+          </FieldRow>
+          {saved.length > 0 && (
+            <FieldRow label={isRu ? "Взять из закладок" : "From your bookmarks"}>
+              <div className="flex flex-wrap gap-1.5">
+                {saved.map((bookmark) => (
+                  <button
+                    key={bookmark.id}
+                    type="button"
+                    onClick={() => onChange({ url: bookmark.url, title: bookmark.title, customIcon: bookmark.customIcon ?? "" })}
+                    className={cn(
+                      "inline-flex h-8 max-w-[160px] items-center gap-1.5 rounded-full px-3 text-xs transition",
+                      safeWebUrl(widget.url) === bookmark.url ? "bg-[var(--primary)] text-[var(--on-primary)]" : "bg-[var(--surface-container-high)] hover:bg-[var(--surface-container-highest)]",
+                    )}
+                  >
+                    <span className="truncate">{bookmark.title}</span>
+                  </button>
+                ))}
+              </div>
+            </FieldRow>
+          )}
+          <FieldRow label={isRu ? "Иконка" : "Icon"}>
+            <Segmented
+              label={isRu ? "Иконка" : "Icon"}
+              value={widget.customIcon ? "custom" : widget.iconStyle}
+              onChange={(value) => onChange(value === "custom" ? {} : { iconStyle: value as "themed" | "original", customIcon: "" })}
+              options={[
+                { value: "themed", label: isRu ? "В цветах темы" : "Themed" },
+                { value: "original", label: isRu ? "Оригинал" : "Original" },
+                ...(widget.customIcon ? [{ value: "custom", label: isRu ? "Своя" : "Custom" }] : []),
+              ]}
+            />
+          </FieldRow>
+          <ToggleRow title={isRu ? "Подпись под иконкой" : "Label under the icon"} checked={widget.showTitle} onChange={(showTitle) => onChange({ showTitle })} />
+          <SizeControls widget={widget} onChange={onChange} />
+          <FieldRow label={t("wg.color")}>
+            <Segmented label={t("wg.color")} value={widget.color} onChange={(color) => onChange({ color })} options={WIDGET_COLORS.map((value) => ({ value, label: t(`wg.c.${value}`) }))} />
+          </FieldRow>
+          <SliderRow label={t("wg.opacity")} value={widget.opacity} min={20} max={100} unit="%" onChange={(opacity) => onChange({ opacity })} />
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -144,7 +312,7 @@ export function WidgetEditor({ widget, onChange, onDuplicate, onRemove, canDupli
               options={BOOKMARK_LAYOUTS.map((value) => ({ value, label: BOOKMARK_LAYOUT_LABELS[value][isRu ? 1 : 0] }))}
             />
           </FieldRow>
-          <SliderRow label={t("wg.size")} value={widget.size} min={SIZE_MIN} max={SIZE_MAX} step={4} unit=" px" onChange={(size) => onChange({ size })} />
+          <SizeControls widget={widget} onChange={onChange} />
           <FieldRow label={t("wg.color")}>
             <Segmented label={t("wg.color")} value={widget.color} onChange={(color) => onChange({ color })} options={WIDGET_COLORS.map((value) => ({ value, label: t(`wg.c.${value}`) }))} />
           </FieldRow>
@@ -224,7 +392,7 @@ export function WidgetEditor({ widget, onChange, onDuplicate, onRemove, canDupli
         </div>
 
         <div className={card}>
-          <SliderRow label={t("wg.size")} value={widget.size} min={SIZE_MIN} max={SIZE_MAX} step={4} unit=" px" onChange={(size) => onChange({ size })} />
+          <SizeControls widget={widget} onChange={onChange} />
           <FieldRow label={t("wg.color")}>
             <Segmented label={t("wg.color")} value={widget.color} onChange={(color) => onChange({ color })} options={WIDGET_COLORS.map((value) => ({ value, label: t(`wg.c.${value}`) }))} />
           </FieldRow>
@@ -340,7 +508,7 @@ export function WidgetEditor({ widget, onChange, onDuplicate, onRemove, canDupli
       </div>
 
       <div className={card}>
-        <SliderRow label={t("wg.size")} value={widget.size} min={SIZE_MIN} max={SIZE_MAX} step={4} unit=" px" onChange={(size) => onChange({ size })} />
+        <SizeControls widget={widget} onChange={onChange} />
         <FieldRow label={t("wg.color")}>
           <Segmented label={t("wg.color")} value={widget.color} onChange={(color) => onChange({ color })} options={WIDGET_COLORS.map((value) => ({ value, label: t(`wg.c.${value}`) }))} />
         </FieldRow>
@@ -422,7 +590,7 @@ export function SystemElementEditor({
   onResetCenter,
   onRequestRemove,
 }: {
-  elementKey: "__system_logo__" | "__system_search__" | "__system_buttons__" | "__system_add_button__";
+  elementKey: "__system_logo__" | "__system_search__" | "__system_buttons__";
   layout: LauncherLayout;
   style: SearchStyle;
   onChangeLayout: (patch: Partial<LauncherLayout>) => void;
@@ -635,73 +803,6 @@ export function SystemElementEditor({
     );
   }
 
-  if (elementKey === "__system_add_button__") {
-    const a = layout.addButton;
-    return (
-      <div className="space-y-4">
-        {!a.visible && (
-          <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-500 flex items-center justify-between">
-            <span>{isRu ? "Кнопка «+ Добавить» скрыта" : "Add button is currently hidden"}</span>
-            <button
-              type="button"
-              onClick={() => onChangeLayout({ addButton: { ...a, visible: true } })}
-              className="rounded-full bg-amber-500 text-black px-2.5 py-1 text-xs font-semibold hover:opacity-90"
-            >
-              {isRu ? "Показать" : "Show"}
-            </button>
-          </div>
-        )}
-        <div className="p-1">
-          <p className="text-xs text-[var(--muted)]">
-            {isRu
-              ? "Перемещайте отдельную кнопку «+ Добавить» в любую точку экрана, меняйте размер во всех направлениях или удалите вовсе."
-              : "Move the standalone Add Bookmark button anywhere on screen, scale it, expand in all directions, or remove completely."}
-          </p>
-        </div>
-        <div className={card}>
-          <ToggleRow
-            title={t("home.element.customPos")}
-            description={isRu ? "Свободное перемещение по экрану" : "Drag anywhere freely on screen"}
-            checked={a.custom}
-            onChange={(custom) => onChangeLayout({ addButton: { ...a, custom } })}
-          />
-          <SliderRow
-            label={t("sb.width")}
-            value={a.width}
-            min={140}
-            max={600}
-            step={8}
-            unit=" px"
-            onChange={(width) => onChangeLayout({ addButton: { ...a, width } })}
-          />
-          <SliderRow
-            label={t("home.element.scale")}
-            value={a.scale}
-            min={50}
-            max={200}
-            step={5}
-            unit="%"
-            onChange={(scale) => onChangeLayout({ addButton: { ...a, scale } })}
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={onResetCenter} className={BUTTON}>
-            <RotateCcw size={15} />
-            {t("home.element.center")}
-          </button>
-          <button
-            type="button"
-            onClick={() => onChangeLayout({ addButton: { ...a, visible: !a.visible } })}
-            className={cn(BUTTON, a.visible && "text-red-400 hover:text-red-300")}
-          >
-            <Trash2 size={15} />
-            {a.visible ? (isRu ? "Удалить кнопку «+ Добавить»" : "Remove Add button") : (isRu ? "Показать кнопку" : "Show button")}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // Bookmarks / Other Buttons
   const b = layout.buttons;
   return (
@@ -766,8 +867,8 @@ export function SystemElementEditor({
         <ToggleRow
           title={isRu ? "Кнопка «+» внутри сетки" : "Show '+' tile in grid"}
           description={isRu ? "Отображать плитку добавления закладки в сетке" : "Display inline add bookmark card in shortcuts grid"}
-          checked={b.showAddButton === true}
-          onChange={(showAddButton) => onChangeLayout({ buttons: { ...b, showAddButton } })}
+          checked={b.addTile !== false}
+          onChange={(addTile) => onChangeLayout({ buttons: { ...b, addTile } })}
         />
       </div>
       <div className="flex flex-wrap gap-2">
@@ -803,20 +904,9 @@ export function LayoutControls({ layout, onChange }: { layout: HomeLayout; onCha
           ]}
         />
       </FieldRow>
-      <FieldRow label={t("home.layout")} hint={layout.mode === "grid" ? t("home.gridHint") : undefined}>
-        <Segmented
-          label={t("home.layout")}
-          value={layout.mode}
-          onChange={(mode) => onChange({ mode })}
-          options={[
-            { value: "free", label: t("home.mode.free") },
-            { value: "grid", label: t("home.mode.grid") },
-          ]}
-        />
-      </FieldRow>
+      <SliderRow label={t("home.cell")} value={layout.cell < 60 ? 88 : layout.cell} min={64} max={128} step={4} unit=" px" onChange={(cell) => onChange({ cell })} />
       {layout.mode === "grid" && (
         <>
-          <SliderRow label={t("home.cell")} value={layout.cell} {...limits(HOME_LAYOUT_SCHEMA.cell)} unit=" px" onChange={(cell) => onChange({ cell })} />
           <FieldRow label={t("home.showGrid")}>
             <Segmented
               label={t("home.showGrid")}

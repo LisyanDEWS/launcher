@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Globe } from "lucide-react";
 import { getHost, type Bookmark, type BookmarkShape } from "../lib/settings";
 import { cn } from "../utils/cn";
+import SiteIcon from "./SiteIcon";
 
 export function getBookmarkShapeClass(shape: BookmarkShape = "circle"): string {
   switch (shape) {
@@ -25,11 +26,13 @@ export function BookmarkIcon({
   bookmark,
   size = 56,
   fallbackShape = "circle",
+  cacheDays,
   className,
 }: {
   bookmark: Bookmark;
   size?: number;
   fallbackShape?: BookmarkShape;
+  cacheDays?: number;
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
@@ -55,12 +58,12 @@ export function BookmarkIcon({
           loading="lazy"
         />
       ) : domain && !failed ? (
-        <img
-          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
-          alt=""
-          onError={() => setFailed(true)}
-          className="h-3/5 w-3/5 object-contain transition-transform duration-300 ease-[var(--ui-ease,cubic-bezier(0.16,1,0.3,1))] group-hover:scale-110"
-          loading="lazy"
+        <SiteIcon
+          url={bookmark.url}
+          size={Math.round(size * 0.68)}
+          cacheDays={cacheDays}
+          title={bookmark.title}
+          className="rounded-[18%]"
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-[var(--surface-container-highest)] text-[var(--muted)]">

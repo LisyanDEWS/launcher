@@ -36,7 +36,7 @@ function mix(variable: string, alpha: number) {
 }
 
 /** Turns a style object into CSS variables consumed by .sb / .sb-btn in index.css. */
-function boxVars(s: SearchStyle, translucent: boolean): CSSProperties {
+export function boxVars(s: SearchStyle, translucent: boolean): CSSProperties {
   const lined = s.fill === "outlined" || s.fill === "underline";
   let alpha = s.fill === "underline" || s.fill === "transparent" ? 0 : s.opacity;
   if (s.fill === "filled" && translucent) alpha = Math.min(alpha, 78);
@@ -201,8 +201,8 @@ export default function SearchBox({
     submitLabel
   );
 
-  // AI search button
-  const showAiButton = s.aiButton !== false;
+  // AI search is triggered from the pill under the bar; the bar itself stays clean without an AI button.
+  const showAiButton = false;
   const AiIcon = AI_ICONS[s.aiButtonIcon ?? "sparkles"] ?? Sparkles;
   const aiBtnSize = Math.min(s.aiButtonSize ?? 34, buttonHeight);
   const aiStyle = s.aiButtonStyle ?? "accent";

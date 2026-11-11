@@ -5,6 +5,8 @@ import { BookmarkIcon, getBookmarkShapeClass } from "./BookmarkIcon";
 import { BUTTON_PRIMARY, INPUT } from "./ui";
 import { useI18n } from "../lib/i18n";
 import { cn } from "../utils/cn";
+import PopularSitePicker from "./PopularSitePicker";
+import type { PopularSite } from "../lib/popular-sites";
 
 type Props = {
   initialBookmark?: Bookmark | null;
@@ -228,6 +230,18 @@ export default function BookmarkDialog({ initialBookmark, defaultShape = "circle
               </p>
             )}
           </div>
+          <PopularSitePicker
+            compact
+            selectedHost={(() => {
+              try { return new URL(safeWebUrl(url)).hostname.replace(/^www\./, ""); } catch { return undefined; }
+            })()}
+            onPick={(site: PopularSite, icon) => {
+              setUrl(`https://${site.host}/`);
+              setTitle(site.title);
+              setCustomIcon(icon);
+              setUrlError(false);
+            }}
+          />
         </div>
 
         {/* Action Buttons */}

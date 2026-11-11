@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { AlertCircle, CornerDownLeft, History, LayoutDashboard, Plus, Search, Settings as SettingsIcon, X } from "lucide-react";
+import { AlertCircle, ChevronDown, CornerDownLeft, History, LayoutDashboard, Search, Settings as SettingsIcon } from "lucide-react";
 import AppMenu from "./components/AppMenu";
 import { AppShapeDefs } from "./components/AppShapes";
-import BetterSearchBar from "./components/BetterSearchBar";
 import BookmarkDialog from "./components/BookmarkDialog";
-import { BookmarkIcon } from "./components/BookmarkIcon";
 import ContextMenu, { type ContextMenuData } from "./components/ContextMenu";
 import Logo from "./components/Logo";
+import NewsFeed from "./components/NewsFeed";
+import { rememberSearchQuery } from "./lib/news";
+import { scrollToLauncher, scrollToNews, useInNews, useNewsMagnet } from "./lib/news-magnet";
+import QuickPills from "./components/QuickPills";
 import SearchBox, { searchHints } from "./components/SearchBox";
+import SearchOverlay from "./components/SearchOverlay";
+import ShortcutRow from "./components/ShortcutRow";
 import SettingsScreen from "./components/SettingsScreen";
 import { SettingsContext, type AnalysisState, type SettingsContextValue } from "./components/settings/context";
 import WallpaperLayer from "./components/WallpaperLayer";
@@ -20,13 +24,16 @@ import { I18nContext, detectLanguage, getLanguage, isRtl, matrixSupport, transla
 import { idbDelete, idbSet } from "./lib/idb";
 import type { RestorePayload } from "./lib/backup";
 import { useThemedFavicon } from "./lib/favicon";
+import { pushFaviconTheme } from "./lib/favicon-bridge";
 import { openIncognito } from "./lib/incognito";
 import {
+  AI_HISTORY_KEY,
   BOOKMARKS_KEY,
   HISTORY_KEY,
   SETTINGS_KEY,
   safeWebUrl,
   persist,
+  readAiHistory,
   readBookmarks,
   readHistory,
   readSettings,
@@ -37,6 +44,7 @@ import {
   type SettingsSection,
 } from "./lib/settings";
 import { stage, useStageMode } from "./lib/stage";
+import { editButtonRect, liftWidgetsAbove } from "./lib/widgets";
 import { PALETTE_VARS, PRESET_COLORS, analyzeWallpaper, buildPalette } from "./lib/theme";
 import { useWallpaper, WALLPAPER_FILE_KEY } from "./lib/wallpaper";
 import { useWidgetActions } from "./lib/widgets";
@@ -62,6 +70,9 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(readBookmarks);
   const [history, setHistory] = useState<string[]>(readHistory);
+  const [aiHistory, setAiHistory] = useState<string[]>(readAiHistory);
+  const [searchOverlayOpen, setSearchOverlayOpen] = useState(false);
+  const [searchFromY, setSearchFromY] = useState(140);
   const [settings, setSettings] = useState<Settings>(readSettings);
   const [bookmarkDialog, setBookmarkDialog] = useState(false);
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
@@ -78,14 +89,17 @@ export default function App() {
   const [selectedWidget, setSelectedWidget] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [showSearchRemoveDialog, setShowSearchRemoveDialog] = useState(false);
+  /** Bumped by a widget's "Settings" button: the edit panel opens on that widget. */
+  const [settingsSignal, setSettingsSignal] = useState(0);
   // AI search stays on until switched off (desktop-friendly), and routes every search through it.
   const [aiOn, setAiOn] = useState(settings.searchStyle.aiMode === "toggle" && settings.searchStyle.aiDefaultOn);
   // A photo or file the user attached to search by it instead of typing.
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
-  // The Better Search Bar has its own query so the two bars never fight over one input.
-  const [barQuery, setBarQuery] = useState("");
+  // Incognito pill arms private search.
   const [incognitoOn, setIncognitoOn] = useState(false);
+  const lensInput = useRef<HTMLInputElement>(null);
+  const attachInput = useRef<HTMLInputElement>(null);
   const editState = useRef({ editing: false, selected: null as string | null });
   const widgetActions = useWidgetActions(setSettings);
 
@@ -94,11 +108,25 @@ export default function App() {
   }, [editing, selectedWidget]);
 
   const enterEdit = useCallback((id: string | null = null) => {
+    setSearchOverlayOpen(false);
     setSuggestionsOpen(false);
     setActiveSuggestion(-1);
     (document.activeElement as HTMLElement | null)?.blur?.();
     setSelectedWidget(id);
     setEditing(true);
+  }, []);
+
+  const openSearchOverlay = useCallback(() => {
+    if (editing) return;
+    const rect = searchArea.current?.querySelector(".sb")?.getBoundingClientRect();
+    setSearchFromY(rect ? Math.max(0, rect.top - 16) : 140);
+    setSearchOverlayOpen(true);
+    setSuggestionsOpen(true);
+  }, [editing]);
+
+  const openElementSettings = useCallback((id: string) => {
+    setSelectedWidget(id);
+    setSettingsSignal((n) => n + 1);
   }, []);
 
   const exitEdit = () => {
@@ -164,6 +192,22 @@ export default function App() {
 
   useEffect(() => persist(BOOKMARKS_KEY, bookmarks), [bookmarks]);
   useEffect(() => persist(SETTINGS_KEY, settings), [settings]);
+
+  // Keep the extension's favicon content script on the same live Material palette. On the web
+  // there is no extension to talk to, so this quietly resolves to "local" and changes nothing.
+  useEffect(() => {
+    if (!settings.faviconTheme.auto) return;
+    const id = window.setTimeout(() => void pushFaviconTheme(settings.faviconTheme), 120);
+    return () => window.clearTimeout(id);
+  }, [
+    settings.faviconTheme,
+    settings.colorSource,
+    settings.presetId,
+    settings.customColor,
+    settings.schemeVariant,
+    settings.theme,
+    dark,
+  ]);
   useEffect(() => persist(HISTORY_KEY, history), [history]);
 
   // Extract Material You seed colours + light/dark tone whenever the wallpaper changes.
@@ -206,7 +250,8 @@ export default function App() {
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      if (!searchArea.current?.contains(event.target as Node)) {
+      const target = event.target as Element | null;
+      if (!searchArea.current?.contains(target as Node) && !target?.closest?.(".search-overlay")) {
         setSuggestionsOpen(false);
         setActiveSuggestion(-1);
       }
@@ -219,6 +264,7 @@ export default function App() {
         else setEditing(false);
         return;
       }
+      setSearchOverlayOpen(false);
       setSettingsOpen(false);
       setBookmarkDialog(false);
       setSuggestionsOpen(false);
@@ -273,7 +319,6 @@ export default function App() {
           if (widgetId === "__system_search__") title = t("home.element.search");
           else if (widgetId === "__system_logo__") title = t("home.element.logo");
           else if (widgetId === "__system_buttons__") title = t("home.element.buttons");
-          else if (widgetId === "__system_add_button__") title = isRu ? "Кнопка «+ Добавить»" : "Add Bookmark Button";
           else {
             const w = settings.widgets.find((item) => item.id === widgetId);
             if (w) {
@@ -353,7 +398,7 @@ export default function App() {
 
   const suggestionGroups = useMemo<SuggestionGroup[]>(() => {
     const term = query.trim();
-    if (!term || !settings.searchSuggestions) return [];
+    if (!term || !settings.searchSuggestions || incognitoOn) return [];
     const normalized = term.toLocaleLowerCase();
     const recent = history.filter((item) => item.toLocaleLowerCase().includes(normalized)).slice(0, 4);
     const used = new Set(recent.map((item) => item.toLocaleLowerCase()));
@@ -384,7 +429,7 @@ export default function App() {
   }, [history, query, remoteSuggestions, settings.searchSuggestions, t]);
 
   const flattened = useMemo(() => suggestionGroups.flatMap((group) => group.items), [suggestionGroups]);
-  const showSuggestionList = suggestionsOpen && settings.searchSuggestions && suggestionGroups.length > 0;
+  const showSuggestionList = suggestionsOpen && settings.searchSuggestions && !incognitoOn && suggestionGroups.length > 0;
 
   /** The URL an AI search goes to; falls back to Google AI Mode when the template is not usable. */
   const aiTarget = (term: string) => {
@@ -448,9 +493,16 @@ export default function App() {
   const runSearch = (value: string) => {
     const term = value.trim();
     if (!term) return;
-    const nextHistory = [term, ...history.filter((item) => item.toLocaleLowerCase() !== term.toLocaleLowerCase())].slice(0, 10);
+    rememberSearchQuery(term);
+    const nextHistory = [term, ...history.filter((item) => item.toLocaleLowerCase() !== term.toLocaleLowerCase())].slice(0, 20);
     setHistory(nextHistory);
     persist(HISTORY_KEY, nextHistory); // synchronously: navigation starts right away
+    const nextAi = aiOn
+      ? [term, ...aiHistory.filter((item) => item.toLocaleLowerCase() !== term.toLocaleLowerCase())].slice(0, 20)
+      : aiHistory.filter((item) => item.toLocaleLowerCase() !== term.toLocaleLowerCase());
+    setAiHistory(nextAi);
+    persist(AI_HISTORY_KEY, nextAi);
+    setSearchOverlayOpen(false);
     setSuggestionsOpen(false);
     setActiveSuggestion(-1);
     setGoing(true);
@@ -461,20 +513,31 @@ export default function App() {
       : isUrl
         ? safeWebUrl(term)
         : `https://www.google.com/search?q=${encodeURIComponent(term)}&hl=${encodeURIComponent(language.google)}`;
-    // The launcher stays put so widgets and history survive the search.
-    window.open(target, "_blank", "noopener,noreferrer");
+    const pop = window.open(target, "_blank", "noopener,noreferrer");
+    if (!pop || pop.closed || typeof pop.closed === "undefined") {
+      window.location.href = target;
+    }
   };
 
   const runAiSearch = (value: string) => {
     const term = (value || query).trim();
     if (!term) return;
-    const nextHistory = [term, ...history.filter((item) => item.toLocaleLowerCase() !== term.toLocaleLowerCase())].slice(0, 10);
+    rememberSearchQuery(term);
+    const nextHistory = [term, ...history.filter((item) => item.toLocaleLowerCase() !== term.toLocaleLowerCase())].slice(0, 20);
     setHistory(nextHistory);
     persist(HISTORY_KEY, nextHistory);
+    const nextAi = [term, ...aiHistory.filter((item) => item.toLocaleLowerCase() !== term.toLocaleLowerCase())].slice(0, 20);
+    setAiHistory(nextAi);
+    persist(AI_HISTORY_KEY, nextAi);
+    setSearchOverlayOpen(false);
     setSuggestionsOpen(false);
     setActiveSuggestion(-1);
     setGoing(true);
-    window.open(aiTarget(term), "_blank", "noopener,noreferrer");
+    const target = aiTarget(term);
+    const pop = window.open(target, "_blank", "noopener,noreferrer");
+    if (!pop || pop.closed || typeof pop.closed === "undefined") {
+      window.location.href = target;
+    }
   };
 
   /** A photo picked from the gallery goes straight to Google Lens. */
@@ -510,28 +573,91 @@ export default function App() {
     [isRu],
   );
 
-  const runIncognito = useCallback(async () => {
-    const url = `https://www.google.com/search?q=${encodeURIComponent(barQuery.trim() || " ")}`;
-    const result = await openIncognito(url);
-    setIncognitoOn(result === "opened");
-    setToastMessage({
-      id: Date.now(),
-      text:
-        result === "opened"
-          ? t("better.incognitoOpened" as never)
-          : result === "unsupported"
-            ? t("better.incognitoUnsupported" as never)
-            : t("better.incognitoBlocked" as never),
+  /** Opens a genuinely private window through the extension, with an honest fallback. */
+  const runPrivateSearch = useCallback(
+    async (value: string) => {
+      const term = value.trim();
+      const target = term
+        ? `https://www.google.com/search?q=${encodeURIComponent(term)}&hl=${encodeURIComponent(language.google)}`
+        : "https://www.google.com/";
+      const result = await openIncognito(target);
+      if (result === "unsupported" || result === "failed") {
+        // A web page cannot force Chrome's incognito mode; be transparent and still useful.
+        window.open(target, "_blank", "noopener,noreferrer");
+      }
+      setToastMessage({
+        id: Date.now(),
+        text:
+          result === "opened"
+            ? t("better.incognitoOpened")
+            : result === "blocked"
+              ? t("better.incognitoBlocked")
+              : isRu
+                ? "Расширение не подключено — открыл обычный поиск. Для настоящего инкогнито установите расширение LisYan."
+                : "The extension isn't connected, so this opened a normal search. Install LisYan for real incognito.",
+      });
+      return result;
+    },
+    [isRu, language.google, t],
+  );
+
+  const toggleIncognito = useCallback(async () => {
+    if (query.trim()) {
+      await runPrivateSearch(query);
+      setIncognitoOn(false);
+      return;
+    }
+    setIncognitoOn((current) => {
+      const next = !current;
+      setToastMessage({
+        id: Date.now(),
+        text: next
+          ? isRu
+            ? "Приватный поиск включён: следующий запрос откроется в инкогнито."
+            : "Private search is armed: the next query opens incognito."
+          : isRu
+            ? "Приватный поиск выключен."
+            : "Private search is off.",
+      });
+      return next;
     });
-  }, [barQuery, t]);
+    setSuggestionsOpen(false);
+  }, [isRu, query, runPrivateSearch]);
+
+  /** Voice input for the pill; the SearchBox keeps its own microphone too. */
+  const startVoice = useCallback(() => {
+    const host = globalThis as unknown as { SpeechRecognition?: new () => SpeechRecognition; webkitSpeechRecognition?: new () => SpeechRecognition };
+    const Speech = host.SpeechRecognition ?? host.webkitSpeechRecognition;
+    if (!Speech) {
+      setToastMessage({ id: Date.now(), text: isRu ? "Голосовой ввод недоступен в этом браузере." : "Voice input isn't available in this browser." });
+      return;
+    }
+    const recognizer = new Speech();
+    recognizer.lang = isRu ? "ru-RU" : "en-US";
+    recognizer.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0]?.[0]?.transcript ?? "";
+      if (transcript) {
+        setQuery(transcript);
+        setSuggestionsOpen(false);
+        searchArea.current?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
+      }
+    };
+    recognizer.start();
+  }, [isRu]);
 
   const handleSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const selected = activeSuggestion >= 0 ? flattened[activeSuggestion] : undefined;
+    if (incognitoOn) {
+      setSuggestionsOpen(false);
+      void runPrivateSearch(selected ?? query);
+      setIncognitoOn(false);
+      return;
+    }
     if (attachment) {
       searchByAttachment(attachment);
       return;
     }
-    const selected = activeSuggestion >= 0 ? flattened[activeSuggestion] : undefined;
     runSearch(selected ?? query);
   };
 
@@ -600,13 +726,21 @@ export default function App() {
     bookmarks,
     history,
     removeBookmark,
-    clearHistory: () => setHistory([]),
+    clearHistory: () => {
+      setHistory([]);
+      setAiHistory([]);
+      persist(HISTORY_KEY, []);
+      persist(AI_HISTORY_KEY, []);
+    },
     restoreBackup,
     addBookmark: () => {
       setSettingsOpen(false);
       setEditingBookmark(null);
       setBookmarkDialog(true);
     },
+    saveBookmark: (data) =>
+      setBookmarks((current) => [...current, { id: crypto.randomUUID(), title: data.title, url: data.url, customIcon: data.customIcon, shape: data.shape }]),
+    setBookmarkOrder: (next) => setBookmarks(next),
     goTo: setActiveSection,
     toast: (text) => setToastMessage({ id: Date.now(), text }),
     dark,
@@ -625,6 +759,27 @@ export default function App() {
     if (aiMode !== "toggle") setAiOn(false);
   }, [aiMode]);
   const { staged, shrunk } = useStageMode(editing);
+  useNewsMagnet(settings.news.enabled && !staged, editing);
+  // The "edit home screen" button belongs to the launcher page only; in the news it steps aside.
+  const inNews = useInNews();
+
+  // With the news band on, widgets must stay off the "edit home" button. Existing saves that
+  // already sit on it are lifted up once — a lifted widget pushes the ones above it in turn.
+  const liftedRef = useRef(false);
+  useEffect(() => {
+    if (!settings.news.enabled) {
+      liftedRef.current = false;
+      return;
+    }
+    if (liftedRef.current) return;
+    liftedRef.current = true;
+    const viewport = { w: window.innerWidth, h: window.innerHeight };
+    setSettings((current) => {
+      if (!current.news.enabled || !current.widgets.length) return current;
+      const lifted = liftWidgetsAbove(current.widgets, viewport, current.homeLayout, editButtonRect(viewport));
+      return lifted === current.widgets ? current : { ...current, widgets: lifted };
+    });
+  }, [settings.news.enabled]);
 
   // The search box loses focus while editing (so it isn't mistaken for a selection). Give it back afterwards —
   // but not on touch screens, where it would pop the keyboard open.
@@ -682,6 +837,7 @@ export default function App() {
               editing={editing}
               selectedId={selectedWidget}
               halo={hasWallpaper}
+              newsEnabled={settings.news.enabled}
               onSelect={setSelectedWidget}
               onChange={widgetActions.change}
               onRemove={(id) => {
@@ -689,6 +845,7 @@ export default function App() {
                 setSelectedWidget(null);
               }}
               onDuplicate={(id) => setSelectedWidget(widgetActions.duplicate(id))}
+              onOpenSettings={openElementSettings}
               onEnterEdit={enterEdit}
               onDragState={setDragging}
             />
@@ -713,7 +870,23 @@ export default function App() {
               </div>
             )}
 
-            {!editing && (
+            {!editing && !staged && settings.news.enabled && (
+              <button
+                type="button"
+                onClick={scrollToNews}
+                className={cn("news-handle", inNews && "is-hidden")}
+                aria-label={isRu ? "Открыть новости" : "Open news"}
+                tabIndex={inNews ? -1 : 0}
+              >
+                <span className="news-handle-grip" aria-hidden="true" />
+                <span className="news-handle-ico">
+                  <ChevronDown size={15} strokeWidth={2.4} aria-hidden="true" />
+                </span>
+                <span className="news-handle-text">{isRu ? "Новости" : "News"}</span>
+              </button>
+            )}
+
+            {!editing && !inNews && (
               <button type="button" onClick={() => enterEdit()} className="edit-home-button">
                 <LayoutDashboard size={15} strokeWidth={2} aria-hidden="true" />
                 <span>{t("home.editShort")}</span>
@@ -734,6 +907,7 @@ export default function App() {
                 editing={editing}
                 selected={selectedWidget === "__system_logo__"}
                 onSelect={() => setSelectedWidget("__system_logo__")}
+                onOpenSettings={() => openElementSettings("__system_logo__")}
                 onMove={(x, y) => {
                   setSettings((s) => ({
                     ...s,
@@ -788,6 +962,7 @@ export default function App() {
                 editing={editing}
                 selected={selectedWidget === "__system_search__"}
                 onSelect={() => setSelectedWidget("__system_search__")}
+                onOpenSettings={() => openElementSettings("__system_search__")}
                 onMove={(x, y) => {
                   setSettings((s) => ({
                     ...s,
@@ -823,7 +998,14 @@ export default function App() {
                 className="relative z-20 w-full"
               >
                 <div ref={searchArea} className={cn("relative z-10 w-full", !editing && "pointer-events-auto")} style={{ maxWidth: settings.launcherLayout.search.width || style.width }}>
-                  <form onSubmit={handleSearch} role="search">
+                  <form
+                    onSubmit={handleSearch}
+                    role="search"
+                    className={cn("transition-all duration-300", searchOverlayOpen && "pointer-events-none scale-95 opacity-0")}
+                    onClick={() => {
+                      if (!editing && !searchOverlayOpen) openSearchOverlay();
+                    }}
+                  >
                     <SearchBox
                       style={{ ...style, width: settings.launcherLayout.search.width || style.width }}
                       anim={settings.textAnim}
@@ -831,7 +1013,7 @@ export default function App() {
                       onValueChange={(next) => {
                         setQuery(next);
                         setRemoteSuggestions([]);
-                        setSuggestionsOpen(Boolean(next.trim()));
+                        setSuggestionsOpen(Boolean(next.trim()) && !incognitoOn);
                         setActiveSuggestion(-1);
                       }}
                       onAiSearch={runAiSearch}
@@ -854,21 +1036,24 @@ export default function App() {
                       submitLabel={t("search.button")}
                       going={going}
                       translucent={hasWallpaper}
-                      autoFocus={!editing}
+                      autoFocus={false}
                       inputProps={{
                         role: "combobox",
                         "aria-autocomplete": "list",
-                        "aria-expanded": showSuggestionList,
+                        "aria-expanded": showSuggestionList || searchOverlayOpen,
                         "aria-controls": "search-suggestions",
-                        onFocus: () => {
-                          if (query.trim()) setSuggestionsOpen(true);
+                        onFocus: (event) => {
+                          if (!editing) {
+                            event.currentTarget.blur();
+                            openSearchOverlay();
+                          }
                         },
                         onKeyDown: handleSearchKeyDown,
                       }}
                     />
                   </form>
 
-                  {showSuggestionList && (
+                  {!searchOverlayOpen && showSuggestionList && (
                     <div
                       id="search-suggestions"
                       role="listbox"
@@ -910,97 +1095,76 @@ export default function App() {
                       ))}
                     </div>
                   )}
+                  {/* Quick pills — two halves of the bar, one element with it. */}
+                  <div className={cn("relative w-full", editing && "pointer-events-none")}>
+                  <QuickPills
+                    pills={settings.quickPills}
+                    style={style}
+                    lang={isRu ? "ru" : "en"}
+                    incognitoOn={incognitoOn}
+                    onIncognito={() => void toggleIncognito()}
+                    onAi={() => {
+                      const term = query.trim();
+                      if (term) runAiSearch(term);
+                      else window.open("https://www.google.com/search?udm=50", "_blank", "noopener,noreferrer");
+                    }}
+                    onNews={() => {
+                      const feed = document.querySelector(".news-feed");
+                      if (feed) feed.scrollIntoView({ behavior: "smooth", block: "start" });
+                      else {
+                        setActiveSection("news");
+                        setSettingsOpen(true);
+                      }
+                    }}
+                    onVoice={startVoice}
+                    onLens={() => lensInput.current?.click()}
+                    onAttach={() => attachInput.current?.click()}
+                    onCustom={(url) => {
+                      if (url) window.open(url, "_blank", "noopener,noreferrer");
+                    }}
+                    onConfigure={() => {
+                      setActiveSection("searchbox");
+                      setSettingsOpen(true);
+                    }}
+                    hasWallpaper={hasWallpaper}
+                  />
+                  </div>
                 </div>
               </MovableElement>
 
-              {/* Better Search Bar — a second, fully customisable bar. */}
-              <MovableElement
-                id="__system_better_bar__"
-                title={t("better.title")}
-                position={settings.launcherLayout.betterBar}
-                homeLayout={settings.homeLayout}
-                editing={editing}
-                selected={selectedWidget === "__system_better_bar__"}
-                onSelect={() => setSelectedWidget("__system_better_bar__")}
-                onMove={(x, y) => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      betterBar: { ...s.launcherLayout.betterBar, custom: true, x, y },
-                    },
-                  }));
+
+              <input
+                ref={lensInput}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) runGalleryImage(file);
+                  event.target.value = "";
                 }}
-                onResize={(width, scale) => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      betterBar: { ...s.launcherLayout.betterBar, width, scale },
-                    },
-                  }));
+              />
+              <input
+                ref={attachInput}
+                type="file"
+                className="hidden"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  setAttachError(null);
+                  if (file.size > 20 * 1024 * 1024) {
+                    setAttachError(isRu ? "Файл больше 20 МБ — выберите меньше" : "That file is larger than 20 MB — choose a smaller one");
+                    return;
+                  }
+                  setAttachment(file);
+                  setToastMessage({ id: Date.now(), text: isRu ? `Прикреплён файл: ${file.name}` : `Attached: ${file.name}` });
                 }}
-                onResetCenter={() => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      betterBar: { ...s.launcherLayout.betterBar, custom: false },
-                    },
-                  }));
-                }}
-                onRemove={() => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      betterBar: { ...s.launcherLayout.betterBar, visible: false },
-                    },
-                  }));
-                  setSelectedWidget(null);
-                }}
-                onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, betterBar: { ...s.launcherLayout.betterBar, visible: true } } }))}
-                onDragState={setDragging}
-                className="relative z-10 w-full"
-              >
-                <div className="relative z-10 w-full" style={{ maxWidth: settings.launcherLayout.betterBar.width || 672 }}>
-                  <BetterSearchBar
-                    config={settings.launcherLayout.betterBar.config}
-                    widgets={settings.widgets}
-                    value={barQuery}
-                    onValueChange={setBarQuery}
-                    onSubmit={(text) => {
-                      const target = settings.launcherLayout.betterBar.config.aiOn
-                        ? `https://www.google.com/search?q=${encodeURIComponent(text)}&udm=50`
-                        : `https://www.google.com/search?q=${encodeURIComponent(text)}`;
-                      window.open(target, "_blank", "noopener,noreferrer");
-                    }}
-                    aiOn={settings.launcherLayout.betterBar.config.aiOn}
-                    onAiToggle={() =>
-                      setSettings((s) => ({
-                        ...s,
-                        launcherLayout: {
-                          ...s.launcherLayout,
-                          betterBar: { ...s.launcherLayout.betterBar, config: { ...s.launcherLayout.betterBar.config, aiOn: !s.launcherLayout.betterBar.config.aiOn } },
-                        },
-                      }))
-                    }
-                    incognitoOn={incognitoOn}
-                    onIncognitoToggle={() => void runIncognito()}
-                    attachment={attachment}
-                    attachError={attachError}
-                    onAttach={(file) => {
-                      setAttachError(null);
-                      if (file && file.size > 20 * 1024 * 1024) {
-                        setAttachError(isRu ? "Файл больше 20 МБ — выберите меньше" : "That file is larger than 20 MB — choose a smaller one");
-                        return;
-                      }
-                      setAttachment(file);
-                    }}
-                    going={going}
-                  />
-                </div>
-              </MovableElement>
+              />
 
               {/* Movable Bookmarks and Action Buttons */}
               <MovableElement
@@ -1011,6 +1175,7 @@ export default function App() {
                 editing={editing}
                 selected={selectedWidget === "__system_buttons__"}
                 onSelect={() => setSelectedWidget("__system_buttons__")}
+                onOpenSettings={() => openElementSettings("__system_buttons__")}
                 onMove={(x, y) => {
                   setSettings((s) => ({
                     ...s,
@@ -1053,143 +1218,47 @@ export default function App() {
                 onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, buttons: { ...s.launcherLayout.buttons, visible: true } } }))}
                 className="relative z-10 w-full"
               >
-                <div
-                  className="grid w-full gap-x-2 gap-y-4 max-w-full justify-center max-sm:[--btn-cols:4]"
-                  style={{
-                    maxWidth: settings.launcherLayout.buttons.width,
-                    gridTemplateColumns: `repeat(var(--btn-cols, ${settings.launcherLayout.buttons.columns || 6}), minmax(0, 1fr))`,
+                <ShortcutRow
+                  bookmarks={bookmarks}
+                  width={Math.min(settings.launcherLayout.search.width || style.width, settings.launcherLayout.buttons.width || 9999)}
+                  iconSize={settings.launcherLayout.buttons.iconSize || 56}
+                  rows={settings.launcherLayout.buttons.rows ?? 2}
+                  showLabels={settings.launcherLayout.buttons.showLabels !== false}
+                  addTile={settings.launcherLayout.buttons.addTile !== false}
+                  shape={settings.bookmarkShape || "circle"}
+                  hasWallpaper={hasWallpaper}
+                  surfaceClass={surface}
+                  addLabel={t("bookmarks.add")}
+                  removeLabel={(name) => t("bookmarks.remove", { name })}
+                  onAdd={() => {
+                    if (editing) return;
+                    setEditingBookmark(null);
+                    setBookmarkDialog(true);
                   }}
-                >
-                  {bookmarks.map((bookmark) => (
-                    <div key={bookmark.id} data-bookmark-id={bookmark.id} className="group relative min-w-0">
-                      <a href={bookmark.url} className="flex min-w-0 flex-col items-center gap-2 rounded-3xl py-2 transition hover:bg-[var(--glass)]">
-                        <BookmarkIcon
-                          bookmark={bookmark}
-                          size={settings.launcherLayout.buttons.iconSize || 56}
-                          fallbackShape={settings.bookmarkShape || "circle"}
-                          className={cn("transition-all duration-300 group-hover:scale-105", surface)}
-                        />
-                        <span
-                          dir="auto"
-                          className={cn("w-full truncate text-center text-xs sm:text-sm", hasWallpaper ? "wp-text text-[var(--fg)]" : "text-[var(--muted)]")}
-                        >
-                          {bookmark.title}
-                        </span>
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => removeBookmark(bookmark.id)}
-                        title={t("bookmarks.remove", { name: bookmark.title })}
-                        aria-label={t("bookmarks.remove", { name: bookmark.title })}
-                        className="absolute end-0 top-0 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--surface-container-highest)] opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100"
-                      >
-                        <X size={13} aria-hidden="true" />
-                      </button>
-                    </div>
-                  ))}
-                  {settings.launcherLayout.buttons.showAddButton && (
-                    <button
-                      type="button"
-                      onClick={() => setBookmarkDialog(true)}
-                      className="group flex min-w-0 flex-col items-center gap-2 rounded-3xl py-2 transition hover:bg-[var(--glass)]"
-                    >
-                      <span
-                        className={cn(
-                          "flex items-center justify-center rounded-full border border-dashed border-[var(--muted)]/50 text-[var(--muted)] transition-all duration-300 group-hover:scale-105 group-hover:border-[var(--fg)] group-hover:text-[var(--fg)]",
-                          hasWallpaper && "bg-[var(--glass)] backdrop-blur-xl",
-                        )}
-                        style={{
-                          width: `${settings.launcherLayout.buttons.iconSize || 56}px`,
-                          height: `${settings.launcherLayout.buttons.iconSize || 56}px`,
-                        }}
-                      >
-                        <Plus size={24} aria-hidden="true" />
-                      </span>
-                      <span className={cn("w-full truncate text-center text-xs sm:text-sm", hasWallpaper ? "wp-text text-[var(--fg)]" : "text-[var(--muted)]")}>
-                        {t("bookmarks.add")}
-                      </span>
-                    </button>
-                  )}
-                </div>
+                  onRemove={removeBookmark}
+                />
               </MovableElement>
 
-              {/* Standalone Movable Add Bookmark Button (Full Widget Mechanics: 8-dir resize, corner brackets, drag anywhere, removable) */}
-              <MovableElement
-                id="__system_add_button__"
-                title={isRu ? "Кнопка «+ Добавить»" : "Add Bookmark Button"}
-                position={settings.launcherLayout.addButton}
-                homeLayout={settings.homeLayout}
-                editing={editing}
-                selected={selectedWidget === "__system_add_button__"}
-                onSelect={() => setSelectedWidget("__system_add_button__")}
-                onMove={(x, y) => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      addButton: { ...s.launcherLayout.addButton, custom: true, x, y },
-                    },
-                  }));
-                }}
-                onResize={(width, scale) => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      addButton: { ...s.launcherLayout.addButton, width, scale },
-                    },
-                  }));
-                }}
-                onResetCenter={() => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      addButton: { ...s.launcherLayout.addButton, custom: false },
-                    },
-                  }));
-                }}
-                onRemove={() => {
-                  setSettings((s) => ({
-                    ...s,
-                    launcherLayout: {
-                      ...s.launcherLayout,
-                      addButton: { ...s.launcherLayout.addButton, visible: false },
-                    },
-                  }));
-                  setSelectedWidget(null);
-                }}
-                onEnterEdit={() => enterEdit()}
-                onDragState={setDragging}
-                onShow={() => setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, addButton: { ...s.launcherLayout.addButton, visible: true } } }))}
-                className="relative z-10 w-full"
-              >
-                <div
-                  className="flex items-center justify-center w-full"
-                  style={{ maxWidth: settings.launcherLayout.addButton.width }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!editing) setBookmarkDialog(true);
-                    }}
-                    className={cn(
-                      "group flex items-center justify-center gap-2.5 w-full py-2.5 px-4 rounded-2xl border border-[var(--line)] transition-all duration-300 shadow-sm",
-                      surface,
-                      "hover:scale-[1.02] hover:border-[var(--primary)] active:scale-[0.98]"
-                    )}
-                  >
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--on-primary)] shadow-xs transition group-hover:scale-110">
-                      <Plus size={16} strokeWidth={2.5} />
-                    </span>
-                    <span className={cn("text-xs sm:text-sm font-semibold truncate", hasWallpaper && "wp-text")}>
-                      {t("bookmarks.add")}
-                    </span>
-                  </button>
-                </div>
-              </MovableElement>
             </main>
             </div>
+
+            {/* News lives in its own band under the whole stage (full-height widget area), so it can never overlap widgets. */}
+            {!editing && !staged && settings.news.enabled && (
+              <section className="news-band relative z-10 w-full">
+                <NewsFeed
+                  onBackToTop={scrollToLauncher}
+                  news={settings.news}
+                  lang={isRu ? "ru" : "en"}
+                  hasWallpaper={hasWallpaper}
+                  accent={settings.colorSource === "custom" ? settings.customColor : PRESET_COLORS[settings.presetId]}
+                  onConfigure={() => {
+                    setActiveSection("news");
+                    setSettingsOpen(true);
+                  }}
+                  onToast={(text) => setToastMessage({ id: Date.now(), text })}
+                />
+              </section>
+            )}
 
             {editing && (
               <EditChrome
@@ -1213,12 +1282,11 @@ export default function App() {
                     setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, search: { ...s.launcherLayout.search, custom: false } } }));
                   } else if (key === "__system_buttons__") {
                     setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, buttons: { ...s.launcherLayout.buttons, custom: false } } }));
-                  } else if (key === "__system_add_button__") {
-                    setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, addButton: { ...s.launcherLayout.addButton, custom: false } } }));
                   }
                 }}
                 onRequestRemoveSearch={() => setShowSearchRemoveDialog(true)}
                 onSelect={setSelectedWidget}
+                settingsSignal={settingsSignal}
                 onExit={exitEdit}
                 settings={settings}
                 onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))}
@@ -1320,8 +1388,6 @@ export default function App() {
                     setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, logo: { ...s.launcherLayout.logo, visible: false } } }));
                   } else if (id === "__system_buttons__") {
                     setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, buttons: { ...s.launcherLayout.buttons, visible: false } } }));
-                  } else if (id === "__system_add_button__") {
-                    setSettings((s) => ({ ...s, launcherLayout: { ...s.launcherLayout, addButton: { ...s.launcherLayout.addButton, visible: false } } }));
                   } else {
                     widgetActions.remove(id);
                     setSelectedWidget(null);
@@ -1353,6 +1419,77 @@ export default function App() {
                 }}
               />
             )}
+
+            <SearchOverlay
+              open={searchOverlayOpen && !editing && !settingsOpen}
+              fromY={searchFromY}
+              query={query}
+              onQueryChange={(next) => {
+                setQuery(next);
+                setRemoteSuggestions([]);
+                setSuggestionsOpen(true);
+                setActiveSuggestion(-1);
+              }}
+              onSubmit={(submittedQuery) => {
+                if (incognitoOn) {
+                  setSearchOverlayOpen(false);
+                  setSuggestionsOpen(false);
+                  void runPrivateSearch(submittedQuery);
+                  setIncognitoOn(false);
+                  return;
+                }
+                if (attachment) {
+                  setSearchOverlayOpen(false);
+                  searchByAttachment(attachment);
+                  return;
+                }
+                runSearch(submittedQuery);
+              }}
+              onClose={() => {
+                setSearchOverlayOpen(false);
+                setSuggestionsOpen(false);
+              }}
+              placeholder={style.placeholder.trim() || t("search.placeholder")}
+              attachment={attachment}
+              attachError={attachError}
+              onAttach={(file) => {
+                setAttachError(null);
+                if (file && file.size > 20 * 1024 * 1024) {
+                  setAttachError(isRu ? "Файл больше 20 МБ — выберите меньше" : "That file is larger than 20 MB — choose a smaller one");
+                  return;
+                }
+                setAttachment(file);
+              }}
+              onGallery={(file) => {
+                setSearchOverlayOpen(false);
+                runGalleryImage(file);
+              }}
+              onVoice={(text) => setQuery(text)}
+              bookmarks={bookmarks}
+              bookmarkShape={settings.bookmarkShape || "circle"}
+              history={history}
+              aiHistory={aiHistory}
+              suggestionGroups={suggestionGroups}
+              onSelectSuggestion={(item, isAi) => {
+                if (incognitoOn) {
+                  setSearchOverlayOpen(false);
+                  void runPrivateSearch(item);
+                  setIncognitoOn(false);
+                  return;
+                }
+                if (isAi) runAiSearch(item);
+                else runSearch(item);
+              }}
+              onNotify={(text) => setToastMessage({ id: Date.now(), text })}
+              launcherTitle={settings.logo === "text" && settings.logoText.trim() ? `${settings.logoText.trim()} Search Launcher` : "LisYan Search Launcher"}
+              incognitoOn={incognitoOn}
+              cacheDays={settings.faviconTheme.cacheDays}
+              onOpenVisited={(url) => {
+                setSearchOverlayOpen(false);
+                setSuggestionsOpen(false);
+                window.open(url, "_blank", "noopener,noreferrer");
+              }}
+            />
           </>
         )}
 

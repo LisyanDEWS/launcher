@@ -1,4 +1,4 @@
-import { CalendarDays, Clock3, Cloud, Code2, Eye, Folder, Plus, Search, X } from "lucide-react";
+import { CalendarDays, Clock3, Cloud, Code2, Eye, Folder, Link2, Plus, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Clock from "./Clock";
@@ -13,6 +13,9 @@ import {
   DEFAULT_BOOKMARKS_WIDGET,
   DEFAULT_WEATHER_WIDGET,
   DEFAULT_WIDGET,
+  DEFAULT_SHORTCUT_WIDGET,
+  readBookmarks,
+  safeWebUrl,
   type BookmarksLayout,
   type ClockFaceId,
   type HomeWidget,
@@ -20,6 +23,7 @@ import {
 } from "../../lib/settings";
 import { WEATHER_RATIOS, widgetSize } from "../../lib/widgets";
 import { cn } from "../../utils/cn";
+import PopularSitePicker from "../PopularSitePicker";
 
 export type GalleryTab = "all" | "clocks" | "weather" | "calendar" | "more";
 type Tab = GalleryTab;
@@ -33,6 +37,7 @@ export function FaceGallery({
   onPickClock,
   onPickWeather,
   onPickBookmarks,
+  onPickShortcut,
   onOpenHtmlStudio,
   initialTab = "all",
 }: {
@@ -42,6 +47,8 @@ export function FaceGallery({
   onPickClock: (face: ClockFaceId) => void;
   onPickWeather: (face: WeatherFaceId) => void;
   onPickBookmarks?: (layout: BookmarksLayout) => void;
+  /** Adds a single round shortcut ("Вкладка") for the chosen site. */
+  onPickShortcut?: (data: { url: string; title: string; customIcon?: string }) => void;
   onOpenHtmlStudio?: () => void;
 }) {
   const { t, lang } = useI18n();
@@ -49,6 +56,9 @@ export function FaceGallery({
   const [tab, setTab] = useState<Tab>(initialTab);
   const [bookmarkLayout, setBookmarkLayout] = useState<BookmarksLayout>("2x2");
   const [preview, setPreview] = useState<HomeWidget | null>(null);
+  const [shortcutUrl, setShortcutUrl] = useState("");
+  const [shortcutTitle, setShortcutTitle] = useState("");
+  const savedBookmarks = useMemo(() => readBookmarks().slice(0, 10), []);
 
   const query = search.trim().toLowerCase();
   const matches = (face: string) => !query || t(`wf.f.${face}` as MessageKey).toLowerCase().includes(query) || face.includes(query);
@@ -87,7 +97,7 @@ export function FaceGallery({
   const showClocks = tab === "all" || tab === "clocks";
   const showWeather = tab === "all" || tab === "weather";
   const showCalendar = tab === "all" || tab === "calendar";
-  const showMore = (tab === "all" || tab === "more") && (!query || "bookmarks html custom закладки папка код".includes(query));
+  const showMore = (tab === "all" || tab === "more") && (!query || "bookmarks html custom закладки папка код вкладка shortcut ярлык сайт".includes(query));
 
   const tabs: { id: Tab; label: string; icon: typeof Clock3 }[] = [
     { id: "all", label: t("wg.all"), icon: Plus },
@@ -121,6 +131,7 @@ export function FaceGallery({
   function cardTitle(widget: HomeWidget) {
     if (widget.type === "bookmarks") return widget.title || t("wf.f.bookmarks");
     if (widget.type === "custom_html") return widget.title;
+    if (widget.type === "shortcut") return widget.title || t("wf.f.shortcut");
     return t(`wf.f.${widget.face}` as MessageKey);
   }
 
@@ -170,8 +181,83 @@ export function FaceGallery({
         ))}
       </div>
 
-      {showMore && (onPickBookmarks || onOpenHtmlStudio) && (
+      {showMore && (onPickBookmarks || onOpenHtmlStudio || onPickShortcut) && (
         <Section title={t("home.create")}>
+          {onPickShortcut && (
+            <div className="fg-card col-span-2 is-flat">
+              <div className="flex items-center gap-3 p-2.5">
+                <span className="fg-thumb !h-14 !w-14 shrink-0" aria-hidden="true">
+                  <FaceThumb widget={{ ...DEFAULT_SHORTCUT_WIDGET, id: "preview-shortcut", showTitle: false }} maxWidth={52} maxHeight={52} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold">{t("wf.f.shortcut")}</div>
+                  <div className="text-[11px] leading-4 text-[var(--muted)]">{lang.startsWith("ru") ? "Одна круглая иконка сайта" : "One round site icon"}</div>
+                </div>
+              </div>
+              {savedBookmarks.length > 0 && (
+                <div className="flex flex-wrap gap-1 border-t border-[var(--line)] px-2.5 py-2">
+                  {savedBookmarks.map((bookmark) => (
+                    <button
+                      key={bookmark.id}
+                      type="button"
+                      onClick={() => onPickShortcut({ url: bookmark.url, title: bookmark.title, customIcon: bookmark.customIcon })}
+                      className="inline-flex h-7 max-w-[150px] items-center gap-1 rounded-full bg-[var(--surface-container-highest)] px-2.5 text-[11px] font-medium transition hover:bg-[var(--primary)] hover:text-[var(--on-primary)]"
+                      title={bookmark.url}
+                    >
+                      <Plus size={11} strokeWidth={2.6} aria-hidden="true" />
+                      <span className="truncate">{bookmark.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="border-t border-[var(--line)] px-2.5 py-2">
+                <PopularSitePicker
+                  compact
+                  title={lang.startsWith("ru") ? "Популярные сайты" : "Popular sites"}
+                  onPick={(site, customIcon) => onPickShortcut?.({ url: `https://${site.host}/`, title: site.title, customIcon })}
+                />
+              </div>
+              <form
+                className="flex items-center gap-1.5 border-t border-[var(--line)] px-2.5 py-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const url = safeWebUrl(shortcutUrl);
+                  if (!url) return;
+                  let title = shortcutTitle.trim();
+                  if (!title) {
+                    try {
+                      title = new URL(url).hostname.replace(/^www\./, "");
+                    } catch {
+                      title = url;
+                    }
+                  }
+                  onPickShortcut({ url, title });
+                  setShortcutUrl("");
+                  setShortcutTitle("");
+                }}
+              >
+                <Link2 size={14} className="shrink-0 text-[var(--muted)]" aria-hidden="true" />
+                <input
+                  value={shortcutUrl}
+                  onChange={(event) => setShortcutUrl(event.target.value)}
+                  placeholder="example.com"
+                  inputMode="url"
+                  aria-label={lang.startsWith("ru") ? "Адрес сайта" : "Website address"}
+                  className="h-8 min-w-0 flex-1 rounded-full bg-[var(--surface-container-highest)] px-3 text-xs outline-none placeholder:text-[var(--muted)]"
+                />
+                <input
+                  value={shortcutTitle}
+                  onChange={(event) => setShortcutTitle(event.target.value)}
+                  placeholder={lang.startsWith("ru") ? "Название" : "Name"}
+                  aria-label={lang.startsWith("ru") ? "Название" : "Name"}
+                  className="h-8 w-24 min-w-0 rounded-full bg-[var(--surface-container-highest)] px-3 text-xs outline-none placeholder:text-[var(--muted)]"
+                />
+                <button type="submit" disabled={!safeWebUrl(shortcutUrl)} className="fg-cta disabled:opacity-40" aria-label={t("home.add")}>
+                  <Plus size={14} strokeWidth={2.6} />
+                </button>
+              </form>
+            </div>
+          )}
           {onPickBookmarks && (
             <div className="fg-card col-span-2 is-flat">
               <button type="button" onClick={() => onPickBookmarks(bookmarkLayout)} className="fg-card-main" aria-label={`${t("home.add")}: ${t("wf.f.bookmarks")}`}>
